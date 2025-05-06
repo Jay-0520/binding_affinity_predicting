@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fep_workflows" 
+version = "0.1.0"
+description = "workflows to automate docking and free energy calculation"
+readme = "README.md"
+authors = [
+  { name = "Jingjing Huang", email = "jjhuang@example.com" }
+]
+
+requires-python = ">=3.9"
+# runtime dependencies:
+dependencies = [
+     "arviz",
+     "numpy",
+     "pandas",
+     "matplotlib",
+     "scipy",
+     "ipython",
+     "pymbar<4",
+     "pydantic",
+     "a3fe",
+]
+
+[project.urls]
+Repository = "https://github.com/Jay-0520/fep_workflow"
+
+
+[project.optional-dependencies]
+test = [
+  "pytest>=6.1.2",
+  "pytest-runner",
+]
+docs = [
+    "sphinx<7.0.0",
+    "sphinx_rtd_theme",
+    "numpydoc",
+]
+
+[tool.setuptools.packages.find]
+where = ["workflows"]
