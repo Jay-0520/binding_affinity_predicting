@@ -1,9 +1,0 @@
-LICENSE
-README.md
-pyproject.toml
-workflows/fep_workflows.egg-info/PKG-INFO
-workflows/fep_workflows.egg-info/SOURCES.txt
-workflows/fep_workflows.egg-info/dependency_links.txt
-workflows/fep_workflows.egg-info/requires.txt
-workflows/fep_workflows.egg-info/top_level.txt
-workflows/free_energy_calc/run.py
