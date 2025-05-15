@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-import copy 
-import logging 
-import os 
-import pathlib 
-import pickle 
-import subprocess 
+import copy
+import logging
+import os
+import pathlib
+import pickle
+import subprocess
 from abc import ABC
-from itertools import count 
-from time import sleep 
-from typing import Any 
+from itertools import count
+from time import sleep
+from typing import Any
 from typing import Optional
 from typing import Tuple
 from typing import Union
-from binding_affinity_predicting.components.utils import load_simulation_state, ensure_dir_exist, dump_simulation_state, load_simulation_state
+from binding_affinity_predicting.components.utils import (
+    load_simulation_state,
+    ensure_dir_exist,
+    dump_simulation_state,
+    load_simulation_state,
+)
 
 import numpy as np
 import pandas as pd
@@ -69,7 +74,6 @@ class SimulationRunner(ABC):
         ensure_dir_exist(self.input_dir)
         ensure_dir_exist(self.output_dir)
 
-
         # Add the dg_multiplier
         if dg_multiplier not in [-1, 1]:
             raise ValueError(
@@ -99,7 +103,7 @@ class SimulationRunner(ABC):
     def add_subrunner(self, runner: SimulationRunner) -> None:
         self._sub_sim_runners.append(runner)
 
-    def run(self, run_nos: Optional[list[int]] = None) -> None:
+    def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
         """
         Run the simulation runner and any sub-simulation runners.
         Parameters
@@ -107,27 +111,36 @@ class SimulationRunner(ABC):
         run_nos : List[int], Optional, default=None
             A list of the run numbers to run. If None, all runs are run.
         """
-        run_nos = run_nos or list(range(1, self.config.ensemble_size + 1))
-        logger.info(f"Running runs: {run_nos}")
-        for sub in self._sub_sim_runners:
-            sub.run(run_nos)
+        run_nos = self._get_valid_run_nos(run_nos)
+
+        self._logger.info(
+            f"Running run numbers {run_nos} for {self.__class__.__name__}..."
+        )
+        for sub_sim_runner in self._sub_sim_runners:
+            sub_sim_runner.run(run_nos=run_nos, *args, **kwargs)
+
+    def setup(self) -> None:
+        f"""Set up the {self.__class__.__name__} and all sub-simulation runners."""
+        self._logger.info(f"Setting up {self.__class__.__name__}...")
+        for sub_sim_runner in self._sub_sim_runners:
+            sub_sim_runner.setup()
 
     def kill(self) -> None:
         """Kill all sub-simulation runners."""
-        logger.info("Killing runs")
-        for sub in self._sub_sim_runners:
-            sub.kill()
+        logger.info(f"Killing {self.__class__.__name__}...")
+        for sub_sim_runner in self._sub_sim_runners:
+            sub_sim_runner.kill()
 
     def wait(self) -> None:
-        """Wait for all sub-simulation runners to finish."""
-        logger.info("Waiting for completion...")
-        while any(sub.running for sub in self._sub_sim_runners):
-            sleep(30)
+        f"""Wait for the {self.__class__.__name__} to finish running."""
+        # Give the simulation runner a chance to start
+        sleep(30)
+        while self.running:
+            sleep(30)  # Check every 30 seconds
 
     @property
     def running(self) -> bool:
         return any(sub.running for sub in self._sub_sim_runners)
-
 
     def get_tot_simtime(self, run_nos: Optional[list[int]] = None) -> float:
         f"""
@@ -194,7 +207,7 @@ class SimulationRunner(ABC):
                 for sub_sim_runner in self._sub_sim_runners
             ]
         )  # GPU hours
-    
+
     @property
     def failed_simulations(self) -> list[SimulationRunner]:
         """The failed sub-simulation runners"""
@@ -244,7 +257,7 @@ class SimulationRunner(ABC):
         return sum(
             [sub_sim_runner.equil_time for sub_sim_runner in self._sub_sim_runners]
         )  # ns
-    
+
     def _get_valid_run_nos(self, run_nos: Optional[list[int]] = None) -> list[int]:
         """
         Check the requested run numbers are valid, and return
@@ -280,8 +293,7 @@ class SimulationRunner(ABC):
             run_nos = list(range(1, self.ensemble_size + 1))
 
         return run_nos
-    
-    
+
     def get_results(self, run_nos: Optional[list[int]] = None) -> dict[any]:
         """
         Get the raw results from each sub-simulation runner.
@@ -303,11 +315,10 @@ class SimulationRunner(ABC):
         )
         results: dict[str, dict[str, np.ndarray]] = {}
         for runner in self.sim_runners:
-            # TODO: what is a good key? 
+            # TODO: what is a good key?
             key = str(runner)
             results[key] = runner.get_results(run_nos=run_nos)
         return results
-    
 
     def __str__(self) -> str:
         """
@@ -319,7 +330,6 @@ class SimulationRunner(ABC):
             f" input={pathlib.Path(self.input_dir).name},"
             f" output={pathlib.Path(self.output_dir).name}]"
         )
-    
 
     def clean_simulations(self, clean_logs=False) -> None:
         """
@@ -382,4 +392,3 @@ class SimulationRunner(ABC):
             if hasattr(self, "_sub_sim_runners"):
                 for sub_sim_runner in self._sub_sim_runners:
                     sub_sim_runner.reset()
-

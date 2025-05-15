@@ -384,7 +384,6 @@ class Stage(_SimulationRunner):
                     win._update_log()
                     self._dump()
 
-
     def _get_lam_vals(self) -> _List[float]:
         """
         Return list of lambda values for the simulations,

@@ -1,16 +1,16 @@
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-import copy 
-import logging 
-import os 
-import pathlib 
-import pickle 
-import subprocess 
+import copy
+import logging
+import os
+import pathlib
+import pickle
+import subprocess
 from abc import ABC
-from itertools import count 
-from time import sleep 
-from typing import Any 
+from itertools import count
+from time import sleep
+from typing import Any
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -34,7 +34,6 @@ class SimulationAnalysis:
         """
         self.sim_runners = sim_runners
         self.output_dir = output_dir
-
 
     def _check_simulation_status():
         """
@@ -237,7 +236,5 @@ class SimulationAnalysis:
     def analyse_convergence():
         pass
 
-
     def aggregate_results():
         pass
-

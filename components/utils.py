@@ -1,14 +1,13 @@
-import copy 
-import logging 
-import os 
-import pathlib 
-import pickle 
+import copy
+import logging
+import os
+import pathlib
+import pickle
 import subprocess
 from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
-
 
 
 def load_simulation_state(update_paths: bool = True) -> None:
@@ -25,9 +24,7 @@ def load_simulation_state(update_paths: bool = True) -> None:
     # Note that we cannot recursively call _load on the sub-simulations
     # because this results in the creation of different virtual queues for the
     # stages and sub-lam-windows and simulations
-    if not pathlib.Path(
-        f"{self.base_dir}/{self.__class__.__name__}.pkl"
-    ).is_file():
+    if not pathlib.Path(f"{self.base_dir}/{self.__class__.__name__}.pkl").is_file():
         raise FileNotFoundError(
             f"Could not find {self.__class__.__name__}.pkl in {self.base_dir}"
         )
@@ -43,9 +40,7 @@ def load_simulation_state(update_paths: bool = True) -> None:
         self.__dict__ = _pkl.load(file)
 
     if update_paths:
-        self.update_paths(
-            old_sub_path=self.base_dir, new_sub_path=supplied_base_dir
-        )
+        self.update_paths(old_sub_path=self.base_dir, new_sub_path=supplied_base_dir)
 
     # Refresh logging
     print("Setting up logging...")
@@ -58,9 +53,8 @@ def load_simulation_state(update_paths: bool = True) -> None:
 def ensure_dir_exist(path: Path) -> None:
     path = Path(path)
     if not path.exists():
-        logger.info(f'directory {path} does not exist')
+        logger.info(f"directory {path} does not exist")
         path.mkdir(parents=True, exist_ok=True)
-
 
 
 def dump_simulation_state(obj: object, base_dir: Path) -> None:

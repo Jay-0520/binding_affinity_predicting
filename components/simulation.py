@@ -348,7 +348,7 @@ class Simulation(_SimulationRunner):
             "--chdir",
             f"{self.output_dir}",
             f"{self.input_dir}/run_somd.sh",
-            f"{self.lam}", 
+            f"{self.lam}",
         ]
         self.job = self.virtual_queue.submit(
             command_list=cmd_list, slurm_file_base=self.slurm_file_base

@@ -16,11 +16,12 @@ from .enums import PreparationStage as _PreparationStage
 from .leg import Leg as _Leg
 from .system_prep import SystemPreparationConfig as _SystemPreparationConfig
 
-# Notes from the paper - by JJ-2025-05-06 
-# The simulations with the ligand in solvent collectively make up the free leg, while those with the receptor–ligand 
-# complex make up the bound leg. Sets of calculations where interactions of a given type are introduced or removed 
-# are termed stages: receptor–ligand restraints were introduced, charges were scaled, and Lennard-Jones (LJ) terms 
+# Notes from the paper - by JJ-2025-05-06
+# The simulations with the ligand in solvent collectively make up the free leg, while those with the receptor–ligand
+# complex make up the bound leg. Sets of calculations where interactions of a given type are introduced or removed
+# are termed stages: receptor–ligand restraints were introduced, charges were scaled, and Lennard-Jones (LJ) terms
 # were scaled in the restrain, discharge, and vanish stages, respectively
+
 
 class Calculation(_SimulationRunner):
     """
@@ -29,6 +30,7 @@ class Calculation(_SimulationRunner):
 
 
     """
+
     # commented out by JJ 2025-05-03
     # required_input_files = [
     #     "run_somd.sh",
