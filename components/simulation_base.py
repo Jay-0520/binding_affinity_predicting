@@ -85,37 +85,41 @@ class SimulationRunner(ABC):
             )  # May overwrite the above attributes and options
 
         else:
-            # Initialise sub-simulation runners with an empty list
             self._sub_sim_runners: list[SimulationRunner] = []
-
-            # Initialise runtime attributes with default values
-            for attribute, value in self.runtime_attributes.items():
-                setattr(self, attribute, value)
-
-            # Save state
+            self._init_runtime_attributes()
+            # Save state or not
             if save_state_on_init:
                 dump_simulation_state()
 
+    def _init_runtime_attributes(self) -> None:
+        for attribute, value in self.runtime_attributes.items():
+            setattr(self, attribute, value)
 
-    def _init_runtime(self) -> None:
-        # Initialize attributes for runtime
-        self.runtime_state: dict[str, Any] = {}
-
+    # TDDO: maybe not needed
     def add_subrunner(self, runner: SimulationRunner) -> None:
         self._sub_sim_runners.append(runner)
 
     def run(self, run_nos: Optional[list[int]] = None) -> None:
+        """
+        Run the simulation runner and any sub-simulation runners.
+        Parameters
+        ----------
+        run_nos : List[int], Optional, default=None
+            A list of the run numbers to run. If None, all runs are run.
+        """
         run_nos = run_nos or list(range(1, self.config.ensemble_size + 1))
         logger.info(f"Running runs: {run_nos}")
         for sub in self._sub_sim_runners:
             sub.run(run_nos)
 
     def kill(self) -> None:
+        """Kill all sub-simulation runners."""
         logger.info("Killing runs")
         for sub in self._sub_sim_runners:
             sub.kill()
 
     def wait(self) -> None:
+        """Wait for all sub-simulation runners to finish."""
         logger.info("Waiting for completion...")
         while any(sub.running for sub in self._sub_sim_runners):
             sleep(30)
@@ -170,7 +174,6 @@ class SimulationRunner(ABC):
                 for sub_sim_runner in self._sub_sim_runners
             ]
         )
-
 
     @property
     def tot_simtime(self) -> float:
@@ -281,7 +284,7 @@ class SimulationRunner(ABC):
     
     def get_results(self, run_nos: Optional[list[int]] = None) -> dict[any]:
         """
-        Get the results of the simulation.
+        Get the raw results from each sub-simulation runner.
 
         Parameters
         ----------
@@ -291,21 +294,92 @@ class SimulationRunner(ABC):
         Returns
         -------
         results : dict
-            A dictionary of the results of the simulation.
+            A dict mapping each sub-runner’s name (str(runner)) to the dict
+            that runner.get_results() returns.
         """
-        logger.info(f"Getting results for runs {run_nos} for {self.__class__.__name__}......")
         run_nos = self._get_valid_run_nos(run_nos)
-        return {
-            sub_sim_runner.run: sub_sim_runner.get_results(run_nos=run_nos)
-            for sub_sim_runner in self._sub_sim_runners
-            if sub_sim_runner.run in run_nos
-        }
+        logger.info(
+            f"Gathering raw results for runs {run_nos} from {self.__class__.__name__}..."
+        )
+        results: dict[str, dict[str, np.ndarray]] = {}
+        for runner in self.sim_runners:
+            # TODO: what is a good key? 
+            key = str(runner)
+            results[key] = runner.get_results(run_nos=run_nos)
+        return results
+    
 
+    def __str__(self) -> str:
+        """
+        Return a string representation of the simulation runner.
+        """
+        return (
+            f"{self.__class__.__name__}"
+            f"[ensemble={self.ensemble_size},"
+            f" input={pathlib.Path(self.input_dir).name},"
+            f" output={pathlib.Path(self.output_dir).name}]"
+        )
+    
 
-    def clean(self, clean_logs: bool = False) -> None:
-        for pattern in ["*.png", "results.csv"]:
-            for p in self.base_dir.glob(pattern):
-                p.unlink()
+    def clean_simulations(self, clean_logs=False) -> None:
+        """
+        Clean the simulation runner by deleting all files
+        with extensions matching self.__class__.run_files in the
+        base and output dirs, and resetting the total runtime to 0.
+
+        Parameters
+        ----------
+        clean_logs : bool, default=False
+            If True, also delete the log files.
+        """
+        delete_files = self.__class__.run_files
+
+        for del_file in delete_files:
+            # Delete files in base directory
+            for file in pathlib.Path(self.base_dir).glob(del_file):
+                logger.info(f"Deleting {file}")
+                subprocess.run(["rm", file])
+
+            # Delete files in output directory
+            for file in pathlib.Path(self.output_dir).glob(del_file):
+                logger.info(f"Deleting {file}")
+                subprocess.run(["rm", file])
+
+        # Reset the runtime attributes
+        self.reset(reset_sub_sims=False)
+
         if clean_logs:
-            log = self.base_dir / f"{self.__class__.__name__}.log"
-            log.write_text("")
+            # Delete log file contents without deleting the log files
+            subprocess.run(
+                [
+                    "truncate",
+                    "-s",
+                    "0",
+                    os.path.join(self.base_dir, self.__class__.__name__ + ".log"),
+                ]
+            )
+
+        # Clean any sub-simulation runners
+        if hasattr(self, "_sub_sim_runners"):
+            for sub_sim_runner in self._sub_sim_runners:
+                sub_sim_runner.clean(clean_logs=clean_logs)
+
+    def reset(self, reset_sub_sims: bool = True) -> None:
+        """
+        Reset all attributes changed by the runtime
+        algorithms to their default values.
+
+        Parameters
+        ----------
+        reset_sub_sims : bool, default=True
+            If True, also reset any sub-simulation runners.
+        """
+        for attr, value in self.__class__.runtime_attributes.items():
+            logger.info(f"Resetting the attribute {attr} to {value}.")
+            setattr(self, attr, value)
+
+        if reset_sub_sims:
+            if hasattr(self, "_sub_sim_runners"):
+                for sub_sim_runner in self._sub_sim_runners:
+                    sub_sim_runner.reset()
+
