@@ -86,5 +86,5 @@ class PreparationStage(_Enum):
         else:
             return [
                 f"{leg_type.name.lower()}{self.file_suffix}.{file_type}"
-                for file_type in ["prm7", "rst7"]
+                for file_type in ["gro", "top"]   # force to use GROMACS 
             ]

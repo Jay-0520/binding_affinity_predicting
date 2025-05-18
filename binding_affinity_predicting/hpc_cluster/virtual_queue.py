@@ -5,24 +5,29 @@ import glob as _glob
 import logging as _logging
 import os as _os
 import subprocess as _subprocess
-from dataclasses import dataclass as _dataclass
+from dataclasses import dataclass
 from time import sleep as _sleep
 from typing import List as _List
 from typing import Optional as _Optional
 
-from ._logging_formatters import _A3feFileFormatter, _A3feStreamFormatter
-from ._utils import retry as _retry
-from .enums import JobStatus as _JobStatus
+from binding_affinity_predicting.schemas.enums import JobStatus
+from binding_affinity_predicting.hpc_cluster.utils import retry
+import logging
 
 
-@_dataclass
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+
+@dataclass
 class Job:
     """Class to hold information about a job"""
 
     virtual_job_id: int
     command_list: _List[str]
     slurm_job_id: _Optional[int] = None
-    status: _JobStatus = _JobStatus.NONE  # type: ignore
+    status: JobStatus = JobStatus.NONE  # type: ignore
     slurm_file_base: _Optional[str] = None
 
     def __str__(self) -> str:
@@ -96,6 +101,34 @@ class VirtualQueue:
         # Write out initial settings
         self._update_log()
 
+    def _set_up_logging(self) -> None:
+        """Set up logging for the virtual queue"""
+        # Virtual queues didn't use to have the ._stream_log_level attribute. This
+        # code ensures backwards compatibility.
+        if not hasattr(self, "_stream_log_level"):
+            self._stream_log_level = _logging.INFO
+        # If logging has already been set up, remove it
+        if hasattr(self, "_logger"):
+            handlers = self._logger.handlers[:]
+            for handler in handlers:
+                self._logger.removeHandler(handler)
+                handler.close()
+            del self._logger
+        self._logger = _logging.getLogger(str(self))
+        self._logger.setLevel(_logging.DEBUG)
+        self._logger.propagate = False
+        # For the file handler, we want to log everything
+        file_handler = _logging.FileHandler(f"{self.log_dir}/virtual_queue.log")
+        # file_handler.setFormatter(_A3feFileFormatter())
+        file_handler.setLevel(_logging.DEBUG)
+        # For the stream handler, we want to log at the user-specified level
+        stream_handler = _logging.StreamHandler()
+        # stream_handler.setFormatter(_A3feStreamFormatter())
+        stream_handler.setLevel(self._stream_log_level)
+        # Add the handlers to the logger
+        self._logger.addHandler(file_handler)
+        self._logger.addHandler(stream_handler)
+
     @property
     def queue(self) -> _List[Job]:
         """The queue of jobs, both real and virtual."""
@@ -124,7 +157,7 @@ class VirtualQueue:
         # Increment this so that it is never used again for this queue
         self._available_virt_job_id += 1
         job = Job(virtual_job_id, command_list, slurm_file_base=slurm_file_base)
-        job.status = _JobStatus.QUEUED  # type: ignore
+        job.status = JobStatus.QUEUED  # type: ignore
         self._pre_queue.append(job)
         self._logger.info(f"{job} submitted")
         # Now update - the job will be moved to the real queue if there is space
@@ -141,7 +174,7 @@ class VirtualQueue:
             _subprocess.run(["scancel", str(job.slurm_job_id)])
         else:  # Job is in the pre-queue
             self._pre_queue.remove(job)
-        job.status = _JobStatus.KILLED  # type: ignore
+        job.status = JobStatus.KILLED  # type: ignore
 
     def _read_slurm_queue(self) -> _List[int]:
         """
@@ -157,7 +190,7 @@ class VirtualQueue:
         # Get job ids of currently running jobs. This occasionally fails when SLURM is
         # busy (e.g. 'slurm_load_jobs error: Socket timed out on send/recv operation'),
         # so retry a few times, waiting a while in between
-        @_retry(times=5, exceptions=(ValueError), wait_time=120, logger=self._logger)
+        @retry(times=5, exceptions=(ValueError), wait_time=120, logger=self._logger)
         def _read_slurm_queue_inner() -> _List[int]:
             """This inner function is defined so that we can pass self._logger
             to the decorator"""
@@ -207,7 +240,7 @@ class VirtualQueue:
         """
 
         # Define inner loop to allow use of retry decorator with self.logger
-        @_retry(
+        @retry(
             times=15,
             exceptions=(ValueError, RuntimeError),
             wait_time=5,
@@ -245,9 +278,9 @@ class VirtualQueue:
             if job.slurm_job_id not in running_slurm_job_ids:
                 # Check if it has failed
                 if job.has_failed():
-                    job.status = _JobStatus.FAILED  # type: ignore
+                    job.status = JobStatus.FAILED  # type: ignore
                 else:
-                    job.status = _JobStatus.FINISHED  # type: ignore
+                    job.status = JobStatus.FINISHED  # type: ignore
         # Update the slurm queue
         self._slurm_queue = [
             job

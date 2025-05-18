@@ -5,10 +5,19 @@ import pathlib
 import pickle
 import subprocess
 from pathlib import Path
+import BioSimSpace.Sandpit.Exscientia as BSS
 
 
 logger = logging.getLogger(__name__)
 
+
+def check_has_wat_and_box(system: BSS._SireWrappers._system.System) -> None:  # type: ignore
+    """Check that the system has water and a box."""
+    if system.getBox() == (None, None):
+        raise ValueError("System does not have a box.")
+    if system.nWaterMolecules() == 0:
+        raise ValueError("System does not have water.")
+    
 
 def load_simulation_state(update_paths: bool = True) -> None:
     """Load the state of the simulation object from a pickle file, and do
@@ -21,33 +30,7 @@ def load_simulation_state(update_paths: bool = True) -> None:
         so that the base directory becomes the directory passed to the SimulationRunner,
         or the current working directory if no directory was passed.
     """
-    # Note that we cannot recursively call _load on the sub-simulations
-    # because this results in the creation of different virtual queues for the
-    # stages and sub-lam-windows and simulations
-    if not pathlib.Path(f"{self.base_dir}/{self.__class__.__name__}.pkl").is_file():
-        raise FileNotFoundError(
-            f"Could not find {self.__class__.__name__}.pkl in {self.base_dir}"
-        )
-
-    # Store previous value of base dir before it is potentially overwritten below
-    supplied_base_dir = self.base_dir
-
-    # Load the SimulationRunner, possibly overwriting directories
-    print(
-        f"Loading previous {self.__class__.__name__}. Any arguments will be overwritten..."
-    )
-    with open(f"{self.base_dir}/{self.__class__.__name__}.pkl", "rb") as file:
-        self.__dict__ = _pkl.load(file)
-
-    if update_paths:
-        self.update_paths(old_sub_path=self.base_dir, new_sub_path=supplied_base_dir)
-
-    # Refresh logging
-    print("Setting up logging...")
-    _refresh_logging()
-
-    # Record that the object was loaded from a pickle file
-    loaded_from_pickle = True
+    pass
 
 
 def ensure_dir_exist(path: Path) -> None:

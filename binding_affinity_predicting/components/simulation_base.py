@@ -54,8 +54,8 @@ class SimulationRunner(ABC):
 
     def __init__(
         self,
-        input_dir: Path,
-        output_dir: Path,
+        input_dir: str,
+        output_dir: str,
         ensemble_size: int = 5,
         save_state_on_init: bool = True,
     ) -> None:
@@ -63,8 +63,8 @@ class SimulationRunner(ABC):
         # simulation runner is subsequently loaded from a pickle file)
         # Make sure that we always use absolute paths
 
-        self.input_dir = Path(input_dir)
-        self.output_dir = Path(output_dir)
+        self.input_dir = input_dir
+        self.output_dir = output_dir
         ensure_dir_exist(self.input_dir)
         ensure_dir_exist(self.output_dir)
 
@@ -72,7 +72,7 @@ class SimulationRunner(ABC):
         self.ensemble_size = ensemble_size
 
         # Check if we are starting from a previous simulation runner
-        if pathlib.Path(f"{self.input_dir}/{self.__class__.__name__}.pkl").is_file():
+        if os.path.exists(f"{self.input_dir}/{self.__class__.__name__}.pkl"):
             logger.info(
                 f"Loading previous {self.__class__.__name__}. Any arguments will be overwritten..."
             )

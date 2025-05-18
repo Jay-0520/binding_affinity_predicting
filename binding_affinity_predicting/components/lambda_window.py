@@ -9,8 +9,8 @@ class LambdaWindow(SimulationRunner):
     def __init__(
         self,
         lam_state: int,
-        input_dir: Path,
-        output_dir: Path,
+        input_dir: str,
+        output_dir: str,
         sim_params: dict,
         run_index=1,
     ):

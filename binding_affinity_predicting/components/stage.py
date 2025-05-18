@@ -10,8 +10,8 @@ class Stage(SimulationRunner):
         self,
         stage_type: str,
         lam_list: list[float],
-        input_dir: Path,
-        output_dir: Path,
+        input_dir: str,
+        output_dir: str,
         sim_params: dict,
         run_index=1,
     ):

@@ -6,7 +6,7 @@ from pathlib import Path
 class Leg(SimulationRunner):
     runtime_attributes = {"_finished": False, "_failed": False, "_dg": None}
 
-    def __init__(self, leg_type, stages: list, input_dir: Path, output_dir: Path):
+    def __init__(self, leg_type, stages: list, input_dir: str, output_dir: str):
         super().__init__(input_dir, output_dir, ensemble_size=1)
         self.leg_type = leg_type
         self._sub_sim_runners = stages
