@@ -1,0 +1,28 @@
+Metadata-Version: 2.4
+Name: binding_affinity_predicting
+Version: 0.1.0
+Summary: workflows to automate docking and free energy calculation
+Author-email: Jingjing Huang <jjhuang@example.com>
+Project-URL: Repository, https://github.com/Jay-0520/binding_affinity_predicting
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: arviz
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: matplotlib
+Requires-Dist: scipy
+Requires-Dist: ipython
+Requires-Dist: pymbar<4
+Requires-Dist: pydantic
+Requires-Dist: a3fe
+Provides-Extra: test
+Requires-Dist: pytest>=6.1.2; extra == "test"
+Requires-Dist: pytest-runner; extra == "test"
+Provides-Extra: docs
+Requires-Dist: sphinx<7.0.0; extra == "docs"
+Requires-Dist: sphinx_rtd_theme; extra == "docs"
+Requires-Dist: numpydoc; extra == "docs"
+Dynamic: license-file
+
+# fep_workflow
