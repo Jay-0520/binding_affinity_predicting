@@ -48,16 +48,16 @@ dev = [
 ]
 
 [tool.black]
-line-length = 99
+line-length = 88
 target-version = ['py311']
 skip-string-normalization = true
 
 [tool.isort]
 profile = "black"
-line_length = 99
+line_length = 88
 
 [tool.flake8]
-max-line-length = 99
+max-line-length = 88
 ignore = E203,W503
 exclude =
     .git,
