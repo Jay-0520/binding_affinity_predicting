@@ -2,6 +2,7 @@
 
 import getpass as _getpass
 import glob as _glob
+import logging
 import logging as _logging
 import os as _os
 import subprocess as _subprocess
@@ -10,10 +11,8 @@ from time import sleep as _sleep
 from typing import List as _List
 from typing import Optional as _Optional
 
-from binding_affinity_predicting.schemas.enums import JobStatus
 from binding_affinity_predicting.hpc_cluster.utils import retry
-import logging
-
+from binding_affinity_predicting.schemas.enums import JobStatus
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

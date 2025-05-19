@@ -6,9 +6,9 @@ __all__ = ["Calculation"]
 import logging as _logging
 import os as _os
 import shutil as _shutil
+from pathlib import Path as _Path
 from typing import List as _List
 from typing import Optional as _Optional
-from pathlib import Path as _Path
 
 from ._simulation_runner import SimulationRunner as _SimulationRunner
 from .enums import LegType as _LegType

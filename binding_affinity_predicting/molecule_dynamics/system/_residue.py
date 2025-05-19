@@ -32,7 +32,6 @@ __all__ = ["Residue"]
 from sire.legacy import Mol as _SireMol
 
 from .. import _isVerbose
-
 from ._sire_wrapper import SireWrapper as _SireWrapper
 
 

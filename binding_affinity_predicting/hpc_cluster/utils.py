@@ -1,10 +1,10 @@
 """Functionality for processing slurm files."""
 
+import logging
 import os as _os
 import re as _re
-from typing import Optional, Callable, TypeVar, Any
-import logging
 from time import sleep
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

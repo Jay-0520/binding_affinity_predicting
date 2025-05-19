@@ -1,6 +1,3 @@
-import numpy as np
-import pandas as pd
-import scipy.stats as stats
 import copy
 import logging
 import os
@@ -10,12 +7,14 @@ import subprocess
 from abc import ABC
 from itertools import count
 from time import sleep
-from typing import Any
-from typing import Optional
-from typing import Tuple
-from typing import Union
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
+from typing import Any, Optional, Tuple, Union
 
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+
+from binding_affinity_predicting.components.simulation_base import \
+    SimulationRunner
 
 logger = logging.getLogger(__name__)
 

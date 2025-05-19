@@ -33,10 +33,10 @@ from sire.legacy import Maths as _SireMaths
 from sire.legacy import Mol as _SireMol
 from sire.legacy import Vol as _SireVol
 
+from .. import Units as _Units
 from .. import _isVerbose
 from .._Exceptions import IncompatibleError as _IncompatibleError
 from ..Types import Length as _Length
-from .. import Units as _Units
 
 
 class SireWrapper:

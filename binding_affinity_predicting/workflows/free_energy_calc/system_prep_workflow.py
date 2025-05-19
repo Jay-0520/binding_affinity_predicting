@@ -1,11 +1,12 @@
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.schemas.enums import LegType
-from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
 import logging
-from binding_affinity_predicting.components import system_prep
-from typing import Callable, Union
 from pathlib import Path
+from typing import Callable, Union
 
+from binding_affinity_predicting.components import system_prep
+from binding_affinity_predicting.components.simulation_base import \
+    SimulationRunner
+from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
+from binding_affinity_predicting.schemas.enums import LegType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

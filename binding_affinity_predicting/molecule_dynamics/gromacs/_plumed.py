@@ -26,10 +26,10 @@ __email__ = "lester.hedges@gmail.com"
 
 __all__ = ["Plumed"]
 
-from .._Utils import _try_import
-
 import glob as _glob
 import os as _os
+
+from .._Utils import _try_import
 
 _pygtail = _try_import("pygtail")
 import shlex as _shlex
@@ -37,22 +37,19 @@ import shutil as _shutil
 import subprocess as _subprocess
 import warnings as _warnings
 
+import sire.legacy.Vol as _SireVol
 from sire.legacy.Base import findExe as _findExe
 from sire.legacy.Maths import Vector as _Vector
 from sire.legacy.Mol import MolNum as _MolNum
-import sire.legacy.Vol as _SireVol
 
+from .. import Types as _Types
+from .. import Units as _Units
+from .. import _Exceptions, _Utils
 from .._SireWrappers import System as _System
 from ..Metadynamics import CollectiveVariable as _CollectiveVariable
 from ..Protocol import Metadynamics as _Metadynamics
 from ..Protocol import Steering as _Steering
 from ..Types import Coordinate as _Coordinate
-
-from .. import _Exceptions
-from .. import Types as _Types
-from .. import _Utils
-from .. import Units as _Units
-
 from ._process import _MultiDict
 
 

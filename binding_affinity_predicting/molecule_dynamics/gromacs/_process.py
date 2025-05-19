@@ -38,24 +38,23 @@ from .._Utils import _try_import
 _pygtail = _try_import("pygtail")
 
 import random as _random
+import sys as _sys
 import timeit as _timeit
 import warnings as _warnings
-import sys as _sys
 import zipfile as _zipfile
 
 from sire.legacy import Mol as _SireMol
 
-from .. import _is_interactive, _is_notebook
+from .. import Units as _Units
+from .. import _is_interactive, _is_notebook, _Utils
 from .._Exceptions import IncompatibleError as _IncompatibleError
-from ..Protocol import Metadynamics as _Metadynamics
+from .._SireWrappers import System as _System
+from ..FreeEnergy._restraint import Restraint as _Restraint
 from ..Protocol import Equilibration as _Equilibration
+from ..Protocol import Metadynamics as _Metadynamics
 from ..Protocol import Production as _Production
 from ..Protocol._protocol import Protocol as _Protocol
-from .._SireWrappers import System as _System
 from ..Types._type import Type as _Type
-from .. import Units as _Units
-from .. import _Utils
-from ..FreeEnergy._restraint import Restraint as _Restraint
 
 if _is_notebook:
     from IPython.display import FileLink as _FileLink

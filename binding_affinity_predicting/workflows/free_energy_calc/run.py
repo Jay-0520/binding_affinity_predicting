@@ -1,10 +1,10 @@
+import os
 import shutil
 import subprocess
-import a3fe as a3
-import os
-from a3fe.run.system_prep import SystemPreparationConfig
-from a3fe.run._virtual_queue import VirtualQueue
 
+import a3fe as a3
+from a3fe.run._virtual_queue import VirtualQueue
+from a3fe.run.system_prep import SystemPreparationConfig
 
 # monkey-patch for local run without using slurm 
 if shutil.which("squeue") is None:

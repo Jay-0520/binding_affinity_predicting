@@ -36,19 +36,18 @@ import shutil as _shutil
 import subprocess as _subprocess
 import timeit as _timeit
 import warnings as _warnings
-from tempfile import TemporaryDirectory as _TemporaryDirectory
 from pathlib import Path as _Path
+from tempfile import TemporaryDirectory as _TemporaryDirectory
 
 import numpy as _np
-
-from sire.legacy import Base as _SireBase
 from sire.legacy import IO as _SireIO
+from sire.legacy import Base as _SireBase
 from sire.legacy import Maths as _SireMaths
 from sire.legacy import Units as _SireUnits
 from sire.legacy import Vol as _SireVol
 
-from ..Units.Length import angstrom
 from .._Utils import _assert_imported, _have_imported, _try_import
+from ..Units.Length import angstrom
 
 # alchemlyb isn't available on all variants of Python that we support, so we
 # need to try_import it.
@@ -58,20 +57,15 @@ if _have_imported(_alchemlyb):
     from alchemlyb.parsing.gmx import extract_u_nk as _extract_u_nk
     from alchemlyb.parsing.gmx import extract_dHdl as _extract_dHdl
 
-from .. import _gmx_exe
-from .. import _isVerbose
-from .._Exceptions import MissingSoftwareError as _MissingSoftwareError
-from ..Types._type import Type as _Type
-
 from .. import IO as _IO
 from .. import Protocol as _Protocol
 from .. import Trajectory as _Trajectory
 from .. import Types as _Types
 from .. import Units as _Units
-from .. import _Utils
-
+from .. import _gmx_exe, _isVerbose, _Utils
+from .._Exceptions import MissingSoftwareError as _MissingSoftwareError
+from ..Types._type import Type as _Type
 from . import _process
-
 from ._plumed import Plumed as _Plumed
 
 

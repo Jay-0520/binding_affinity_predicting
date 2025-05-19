@@ -26,32 +26,29 @@ __email__ = "lester.hedges@gmail.com"
 
 __all__ = ["Namd"]
 
-from .._Utils import _try_import
-
 import math as _math
 import os as _os
+
+from .._Utils import _try_import
 
 _pygtail = _try_import("pygtail")
 import timeit as _timeit
 import warnings as _warnings
 
-from sire.legacy import Base as _SireBase
 from sire.legacy import IO as _SireIO
+from sire.legacy import Base as _SireBase
 from sire.legacy import Mol as _SireMol
 from sire.legacy.Maths import Vector as _Vector
-
-from .. import _isVerbose
-from .._Exceptions import IncompatibleError as _IncompatibleError
-from .._Exceptions import MissingSoftwareError as _MissingSoftwareError
-from .._SireWrappers import System as _System
-from ..Types._type import Type as _Type
 
 from .. import IO as _IO
 from .. import Protocol as _Protocol
 from .. import Trajectory as _Trajectory
 from .. import Units as _Units
-from .. import _Utils
-
+from .. import _isVerbose, _Utils
+from .._Exceptions import IncompatibleError as _IncompatibleError
+from .._Exceptions import MissingSoftwareError as _MissingSoftwareError
+from .._SireWrappers import System as _System
+from ..Types._type import Type as _Type
 from . import _process
 
 

@@ -1,2 +1,3 @@
 # ignore all egg-info dirs
 *.egg-info/
+.flake8

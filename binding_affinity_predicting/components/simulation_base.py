@@ -5,23 +5,16 @@ import pathlib
 import subprocess
 from abc import ABC
 from itertools import count
+from pathlib import Path
 from time import sleep
-from typing import Any
-from typing import Optional
-from typing import Tuple
-from typing import Union
-from binding_affinity_predicting.components.utils import (
-    load_simulation_state,
-    ensure_dir_exist,
-    dump_simulation_state,
-    load_simulation_state,
-)
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-from pathlib import Path
 
+from binding_affinity_predicting.components.utils import (
+    dump_simulation_state, ensure_dir_exist, load_simulation_state)
 
 logger = logging.getLogger(__name__)
 # from ..analyse.exceptions import AnalysisError as _AnalysisError

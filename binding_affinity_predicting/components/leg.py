@@ -1,6 +1,8 @@
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.components.stage import Stage
 from pathlib import Path
+
+from binding_affinity_predicting.components.simulation_base import \
+    SimulationRunner
+from binding_affinity_predicting.components.stage import Stage
 
 
 class Leg(SimulationRunner):

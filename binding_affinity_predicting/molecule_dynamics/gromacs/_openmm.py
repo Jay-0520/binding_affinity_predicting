@@ -26,38 +26,33 @@ __email__ = "lester.hedges@gmail.com"
 
 __all__ = ["OpenMM"]
 
-from .._Utils import _try_import
-
 import math as _math
 import os as _os
 
+from .._Utils import _try_import
+
 _pygtail = _try_import("pygtail")
-import sys as _sys
 import shutil as _shutil
+import sys as _sys
 import timeit as _timeit
 import warnings as _warnings
 
-from sire.legacy import Base as _SireBase
 from sire.legacy import IO as _SireIO
+from sire.legacy import Base as _SireBase
 from sire.legacy import Units as _SireUnits
-
-
-from .. import _isVerbose
-from .._Exceptions import IncompatibleError as _IncompatibleError
-from .._Exceptions import MissingSoftwareError as _MissingSoftwareError
-from .._SireWrappers import System as _System
-from ..Metadynamics import CollectiveVariable as _CollectiveVariable
-from ..Types._type import Type as _Type
 
 from .. import IO as _IO
 from .. import Protocol as _Protocol
 from .. import Trajectory as _Trajectory
 from .. import Types as _Types
 from .. import Units as _Units
-from .. import _Utils
-
+from .. import _isVerbose, _Utils
+from .._Exceptions import IncompatibleError as _IncompatibleError
+from .._Exceptions import MissingSoftwareError as _MissingSoftwareError
+from .._SireWrappers import System as _System
+from ..Metadynamics import CollectiveVariable as _CollectiveVariable
+from ..Types._type import Type as _Type
 from . import _process
-
 from ._plumed import Plumed as _Plumed
 
 
@@ -1933,7 +1928,7 @@ class OpenMM(_process.Process):
         """
         # We should verify that openmm is available to prevent
         # difficult-to-debug errors in the run script
-        from ...._Utils import _try_import, _assert_imported
+        from ...._Utils import _assert_imported, _try_import
 
         _openmm = _try_import("openmm")
         _assert_imported(_openmm)

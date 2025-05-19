@@ -1,6 +1,8 @@
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
 from pathlib import Path
+
 from binding_affinity_predicting.components.lambda_window import LambdaWindow
+from binding_affinity_predicting.components.simulation_base import \
+    SimulationRunner
 
 
 class Stage(SimulationRunner):

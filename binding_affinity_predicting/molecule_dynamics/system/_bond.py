@@ -29,11 +29,10 @@ __email__ = "Christopher.Woods@bristol.ac.uk"
 
 __all__ = ["Bond"]
 
-from sire.legacy import Mol as _SireMol
 from sire.legacy import MM as _SireMM
+from sire.legacy import Mol as _SireMol
 
 from .. import _isVerbose
-
 from ._sire_wrapper import SireWrapper as _SireWrapper
 
 

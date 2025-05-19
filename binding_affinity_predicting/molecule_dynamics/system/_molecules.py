@@ -32,10 +32,9 @@ __all__ = ["Molecules"]
 from sire.legacy import Mol as _SireMol
 from sire.legacy import System as _SireSystem
 
+from .. import Units as _Units
 from .. import _isVerbose
 from ..Types import Length as _Length
-from .. import Units as _Units
-
 from ._sire_wrapper import SireWrapper as _SireWrapper
 
 

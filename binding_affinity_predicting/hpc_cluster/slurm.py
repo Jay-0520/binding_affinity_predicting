@@ -1,15 +1,11 @@
-from typing import Callable 
-from typing import Dict 
-from typing import List 
-from typing import Optional 
-from typing import Tuple 
+import logging
+import os
+from pathlib import Path
+from time import sleep
+from typing import Callable, Dict, List, Optional, Tuple
+
 from binding_affinity_predicting.hpc_cluster.utils import get_slurm_file_base
 from binding_affinity_predicting.hpc_cluster.virtual_queue import VirtualQueue
-from time import sleep
-import logging
-from pathlib import Path
-import os
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

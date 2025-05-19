@@ -327,6 +327,6 @@ class SearchResult:
 
 # Import at bottom of module to avoid circular dependency.
 from ._atom import Atom as _Atom
+from ._bond import Bond as _Bond
 from ._molecule import Molecule as _Molecule
 from ._residue import Residue as _Residue
-from ._bond import Bond as _Bond

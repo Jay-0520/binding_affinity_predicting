@@ -32,7 +32,6 @@ import threading as _threading
 import time as _time
 
 from .._SireWrappers import System as _System
-
 from ._process import Process as _Process
 
 

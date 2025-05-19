@@ -1,34 +1,30 @@
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.schemas.enums import LegType
 import logging
-from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule as Molecule
-from sire.legacy import Mol as SireMol
-from binding_affinity_predicting.schemas.enums import (
-    LegType,
-    StageType,
-    PreparationStage,
-)
+import os
+import pathlib
 import pathlib as _pathlib
 import pickle as _pkl
-from typing import Optional, Callable
-import BioSimSpace.Sandpit.Exscientia as BSS
-from pydantic import BaseModel
-from pydantic import Field
-import os
-from binding_affinity_predicting.components.utils import check_has_wat_and_box
-import logging
-import pathlib
-import BioSimSpace.Sandpit.Exscientia as BSS
 import time
-from typing import Optional, Callable, Union
+from typing import Any, Callable, Optional, Union
 
+import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
+from BioSimSpace.Sandpit.Exscientia._SireWrappers import \
+    Molecule  # type: ignore[import]
+from pydantic import BaseModel, Field
+from sire.legacy import Mol as SireMol  # type: ignore[import]
+
+from binding_affinity_predicting.components.simulation_base import \
+    SimulationRunner
+from binding_affinity_predicting.components.utils import check_has_wat_and_box
+from binding_affinity_predicting.schemas.enums import (LegType,
+                                                       PreparationStage,
+                                                       StageType)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
 # Units: runtime (ps), temperature (K), restraint (all, backbone, heavy), pressure (atm)
-_default_preequilibration_steps_bound = [
+_default_preequilibration_steps_bound: list[dict[str, Any]] = [
     {
         "runtime": 5,
         "temperature_start": 0,
@@ -255,7 +251,7 @@ def minimise_system(
 
 def preequilibrate_system(
     source: Union[str, BSS._SireWrappers._system.System],
-    steps: list[dict] = _default_preequilibration_steps_bound,
+    steps: list[dict[str, Any]] = _default_preequilibration_steps_bound,
     output_file_path: Optional[str] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,

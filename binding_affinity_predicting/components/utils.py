@@ -5,8 +5,8 @@ import pathlib
 import pickle
 import subprocess
 from pathlib import Path
-import BioSimSpace.Sandpit.Exscientia as BSS
 
+import BioSimSpace.Sandpit.Exscientia as BSS
 
 logger = logging.getLogger(__name__)
 

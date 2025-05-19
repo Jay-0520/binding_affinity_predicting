@@ -35,20 +35,18 @@ from sire.legacy import IO as _SireIO
 from sire.legacy import Maths as _SireMaths
 from sire.legacy import Mol as _SireMol
 from sire.legacy import System as _SireSystem
-from sire.legacy import Vol as _SireVol
 from sire.legacy import Units as _SireUnits
+from sire.legacy import Vol as _SireVol
+from sire.mol import Select as _Select
 
+from .. import Units as _Units
 from .. import _isVerbose
 from .._Exceptions import IncompatibleError as _IncompatibleError
 from ..Types import Angle as _Angle
 from ..Types import Coordinate as _Coordinate
 from ..Types import Length as _Length
-from .. import Units as _Units
-
 from ._sire_wrapper import SireWrapper as _SireWrapper
-from ._utils import _prot_res, _nucl_res, _ions
-
-from sire.mol import Select as _Select
+from ._utils import _ions, _nucl_res, _prot_res
 
 
 class System(_SireWrapper):
@@ -568,8 +566,9 @@ class System(_SireWrapper):
             or a SearchResult containing molecules.
         """
 
-        from ._search_result import SearchResult as _SearchResult
         from sire.legacy.Mol import SelectorMol as _SelectorMol
+
+        from ._search_result import SearchResult as _SearchResult
 
         # Whether this is a selector mol object.
         is_selector_mol = False

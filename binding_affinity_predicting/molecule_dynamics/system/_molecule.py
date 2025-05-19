@@ -32,9 +32,9 @@ __all__ = ["Molecule"]
 from math import isclose as _isclose
 from warnings import warn as _warn
 
-from sire.legacy import Base as _SireBase
 from sire.legacy import IO as _SireIO
 from sire.legacy import MM as _SireMM
+from sire.legacy import Base as _SireBase
 from sire.legacy import Maths as _SireMaths
 from sire.legacy import Mol as _SireMol
 from sire.legacy import System as _SireSystem
@@ -44,7 +44,6 @@ from .. import _isVerbose
 from .._Exceptions import IncompatibleError as _IncompatibleError
 from ..Types import Coordinate as _Coordinate
 from ..Types import Length as _Length
-
 from ._sire_wrapper import SireWrapper as _SireWrapper
 
 
