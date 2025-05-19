@@ -59,7 +59,7 @@ def run_slurm(
     kwarglist = ", ".join([f"{k}={repr(v)}" for k, v in fn_kwargs.items()])
     all_args = ", ".join([x for x in (arglist, kwarglist) if x])
     header_lines.append(
-        f"\npython -c 'from a3fe.run.system_prep import {sys_prep_fn.__name__}; {sys_prep_fn.__name__}({all_args})'"
+        f"\npython -c 'from {sys_prep_fn.__module__} import {sys_prep_fn.__name__}; {sys_prep_fn.__name__}({all_args})'"
     )
     slurm_script = f"{run_dir}/{job_name}.sh"
     with open(slurm_script, "w") as file:

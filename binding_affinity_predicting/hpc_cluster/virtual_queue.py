@@ -11,8 +11,8 @@ from time import sleep as _sleep
 from typing import List as _List
 from typing import Optional as _Optional
 
+from binding_affinity_predicting.data.enums import JobStatus
 from binding_affinity_predicting.hpc_cluster.utils import retry
-from binding_affinity_predicting.schemas.enums import JobStatus
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
