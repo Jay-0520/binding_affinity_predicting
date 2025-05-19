@@ -12,7 +12,7 @@ authors = [
 ]
 
 requires-python = ">=3.9"
-# runtime dependencies:
+# production dependencies:
 dependencies = [
      "arviz",
      "numpy",
@@ -22,7 +22,7 @@ dependencies = [
      "ipython",
      "pymbar<4",
      "pydantic",
-     "a3fe",
+     "biosimspace",   # double check pkg name
 ]
 
 [project.urls]
@@ -39,6 +39,22 @@ docs = [
     "sphinx_rtd_theme",
     "numpydoc",
 ]
+dev = [
+    "pytest>=6.1.2",
+    "pytest-runner",
+    "black",
+    "flake8",
+    "mypy",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 88
 
 [tool.setuptools.packages.find]
 where = ["."]

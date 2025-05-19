@@ -31,33 +31,38 @@ logger.setLevel(logging.INFO)
 _default_preequilibration_steps_bound = [
     {
         "runtime": 5,
-        "temperature": (0.0, 298.15),  # start and end temperature
+        "temperature_start": 0,
+        "temperature_end": 298.15,
         "restraint": "all",
-        "pressure": None,              # runtime_short_nvt
+        "pressure": None,  # runtime_short_nvt
     },
     {
         "runtime": 10,
-        "temperature": 298.15,         # run at fixed temperature
+        "temperature_start": 0,
+        "temperature_end": 298.15,
         "restraint": "backbone",
-        "pressure": None,              # runtime_nvt with backbone restraints
+        "pressure": None,  # runtime_nvt with backbone restraints
     },
     {
         "runtime": 10,
-        "temperature": 298.15,
+        "temperature_start": 0,
+        "temperature_end": 298.15,
         "restraint": None,
-        "pressure": None,              # runtime_nvt without restraints
+        "pressure": None,  # runtime_nvt without restraints
     },
     {
         "runtime": 10,
-        "temperature": 298.15,
+        "temperature_start": 0,
+        "temperature_end": 298.15,
         "restraint": "heavy",
-        "pressure": 1.0,               # runtime_npt with heavy atom restraints
+        "pressure": 1.0,  # runtime_npt with heavy atom restraints
     },
     {
         "runtime": 10,
-        "temperature": 298.15,
+        "temperature_start": 0,
+        "temperature_end": 298.15,
         "restraint": None,
-        "pressure": 1.0,               # runtime_npt_unrestrained
+        "pressure": 1.0,  # runtime_npt_unrestrained
     },
 ]
 
@@ -195,7 +200,7 @@ def solvate_system(
 def minimise_system(
     source: Union[str, BSS._SireWrappers._system.System],
     output_file_path: str,
-    min_steps: int=1_000,
+    min_steps: int = 1_000,
     mdrun_options: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -221,7 +226,7 @@ def minimise_system(
         solvated_system = BSS.IO.readMolecules(str(source))  # type: ignore
     else:
         solvated_system = source
-    
+
     # Check that it is actually solvated in a box of water
     check_has_wat_and_box(solvated_system)
 
@@ -239,7 +244,9 @@ def minimise_system(
         logger.info(f"Writing solvated system to {output_file_path}")
         os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
         BSS.IO.saveMolecules(
-            str(output_file_path), minimised_system, fileformat=["gro87", "grotop"],
+            str(output_file_path),
+            minimised_system,
+            fileformat=["gro87", "grotop"],
             property_map={"velocity": "foo"},
         )
 
@@ -254,7 +261,7 @@ def preequilibrate_system(
     mdrun_options: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
-    Load a solvated system (from a file or already-loaded System), perform a sequence 
+    Load a solvated system (from a file or already-loaded System), perform a sequence
     of NVT/NPT equilibration steps, and optionally save the final System.
 
     Parameters
@@ -289,22 +296,24 @@ def preequilibrate_system(
     preeq_system = system
     for _param_dict in steps:
         runtime = _param_dict["runtime"]
-        temperature = _param_dict["temperature"]
+        temperature_start = _param_dict["temperature_start"]
+        temperature_end = _param_dict["temperature_end"]
         # if isinstance(temperature, tuple):
         #     logger.info(f"Running equilibration at {temperature[0]} to {temperature[1]} K")
         #     start_temperature = temperature[0]
         #     end_temperature = temperature[1]
-    
+
         restraint = _param_dict["restraint"]
         pressure = _param_dict["pressure"]
- 
+
         logger.info(
-            f"Running equilibration step: {runtime} ps, {temperature} k, restraint={restraint}, pressure={pressure} atm",
+            f"Running equilibration step: {runtime} ps, temperature(start: {temperature_start}, end: {temperature_end}) k, restraint={restraint}, pressure={pressure} atm",
         )
         preeq_system = _heat_and_preequil_system_bss(
             system=preeq_system,
             runtime_ps=runtime,
-            temperature_k=temperature,
+            temperature_start_k=temperature_start,
+            temperature_end_k=temperature_end,
             restraint=restraint,
             pressure_atm=pressure,
             work_dir=work_dir,
@@ -321,28 +330,44 @@ def preequilibrate_system(
     return preeq_system
 
 
-
-def _heat_and_preequil_system_bss(system: BSS._SireWrappers._system.System,
-                                  runtime_ps: float,
-                                  temperature_k: float,
-                                  restraint: str, 
-                                  pressure_atm: float = 1.0,
-                                  work_dir: Optional[str] = None,
-                                  mdrun_options: Optional[str] = None,
-                                  ) -> BSS._SireWrappers._system.System:  # type: ignore
+def _heat_and_preequil_system_bss(
+    system: BSS._SireWrappers._system.System,
+    runtime_ps: float,
+    temperature_start_k: float,
+    temperature_end_k: float,
+    restraint: str,
+    pressure_atm: float = 1.0,
+    work_dir: Optional[str] = None,
+    mdrun_options: Optional[str] = None,
+) -> BSS._SireWrappers._system.System:  # type: ignore
     """
     Pure equilibration: run through a single NVT/NPT step.
     """
+    # convert to BSS units
+    runtime_ps = runtime_ps * BSS.Units.Time.picosecond
+    temperature_start_k = temperature_start_k * BSS.Units.Temperature.kelvin
+    temperature_end_k = temperature_end_k * BSS.Units.Temperature.kelvin
+
+    pressure_atm = (
+        pressure_atm * BSS.Units.Pressure.atm if pressure_atm is not None else None
+    )
+
     protocol = BSS.Protocol.Equilibration(
-            runtime = runtime_ps * BSS.Units.Time.picosecond,
-            temperature = temperature_k * BSS.Units.Temperature.kelvin,
-            pressure = (pressure_atm * BSS.Units.Pressure.atm) if pressure_atm is not None else None,
-            restraint = restraint,
-        )
-    heated_system = run_process(system=system, protocol=protocol, work_dir=work_dir, mdrun_options=mdrun_options)
+        runtime=runtime_ps,
+        temperature_start=temperature_start_k,
+        temperature_end=temperature_end_k,
+        pressure=(
+            (pressure_atm * BSS.Units.Pressure.atm)
+            if pressure_atm is not None
+            else None
+        ),
+        restraint=restraint,
+    )
+    heated_system = run_process(
+        system=system, protocol=protocol, work_dir=work_dir, mdrun_options=mdrun_options
+    )
 
     return heated_system
-
 
 
 def run_process(
@@ -392,7 +417,7 @@ def run_process(
         process.getStdout()
         process.getStderr()
         raise BSS._Exceptions.ThirdPartyError("The process failed.")
-    
+
     system = process.getSystem(block=True)
     if system is None:
         logger.error(process.stdout())
@@ -402,7 +427,6 @@ def run_process(
         raise BSS._Exceptions.ThirdPartyError("The final system is None.")
 
     return system
-
 
 
 def _parameterise_water(
@@ -669,7 +693,6 @@ def _solvate_molecular_system_bss(
     )
 
     return solvated_system
-
 
 
 def rename_lig(
