@@ -20,10 +20,389 @@ import logging
 import pathlib
 import BioSimSpace.Sandpit.Exscientia as BSS
 import time
+from typing import Optional, Callable, Union
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+# Units: runtime (ps), temperature (K), restraint (all, backbone, heavy), pressure (atm)
+_default_preequilibration_steps_bound = [
+    {
+        "runtime": 5,
+        "temperature": (0.0, 298.15),  # start and end temperature
+        "restraint": "all",
+        "pressure": None,              # runtime_short_nvt
+    },
+    {
+        "runtime": 10,
+        "temperature": 298.15,         # run at fixed temperature
+        "restraint": "backbone",
+        "pressure": None,              # runtime_nvt with backbone restraints
+    },
+    {
+        "runtime": 10,
+        "temperature": 298.15,
+        "restraint": None,
+        "pressure": None,              # runtime_nvt without restraints
+    },
+    {
+        "runtime": 10,
+        "temperature": 298.15,
+        "restraint": "heavy",
+        "pressure": 1.0,               # runtime_npt with heavy atom restraints
+    },
+    {
+        "runtime": 10,
+        "temperature": 298.15,
+        "restraint": None,
+        "pressure": 1.0,               # runtime_npt_unrestrained
+    },
+]
+
+
+def parameterise_system(
+    *,
+    protein_path: Optional[str] = None,
+    ligand_path: Optional[str] = None,
+    water_path: Optional[str] = None,
+    protein_ff: str = "ff14SB",
+    ligand_ff: str = "openff_unconstrained-2.0.0",
+    water_ff: str = "ff14SB",
+    water_model: str = "tip3p",
+    output_file_path: Optional[str] = None,
+) -> BSS._SireWrappers._system.System:  # type: ignore
+    """
+    Parameterise and assemble a combined System of any subset of protein, ligand and water.
+    must pass at least one of `protein_path`, `ligand_path` or `water_path`.
+
+    Parameters
+    ----------
+    protein_path: str
+        PDB file for the protein (e.g. "protein.pdb").
+    ligand_path: str
+        SDF (or other) file for the ligand (e.g. "ligand.sdf").
+    water_path: str
+        PDB file for crystal waters (e.g. "water.pdb").
+    protein_ff: str
+        Force field for the protein (default "ff14SB").
+    ligand_ff: str
+        Force field for the ligand (default "openff_unconstrained-2.0.0").
+    water_ff: str
+        Force field for waters (default "ff14SB").
+    water_model: str
+        Water model identifier (default "tip3p").
+    output_file_path: str
+        If provided, writes the combined system out in GROMACS formats.
+
+    Returns
+    -------
+    System
+        The assembled, parameterised BioSimSpace System.
+    """
+    components = []
+
+    if protein_path:
+        prot_sys = _parameterise_protein(
+            file_path=protein_path,
+            forcefield=protein_ff,
+        )
+        components.append(prot_sys)
+
+    if ligand_path:
+        lig_sys = _parameterise_ligand(
+            file_path=ligand_path,
+            forcefield=ligand_ff,
+        )
+        components.append(lig_sys)
+
+    if water_path:
+        wat_sys = _parameterise_water(
+            file_path=water_path,
+            forcefield=water_ff,
+            water_model=water_model,
+        )
+        components.append(wat_sys)
+
+    if not components:
+        raise ValueError(
+            "Must supply at least one of protein_path, ligand_path or water_path!"
+        )
+
+    # Assemble into one System
+    full_system = components[0]
+    for sys_part in components[1:]:
+        full_system += sys_part  # only works for different molecules
+
+    if output_file_path:
+        logger.info(f"Writing assembled system to {output_file_path}")
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        BSS.IO.saveMolecules(
+            str(output_file_path), full_system, fileformat=["gro87", "grotop"]
+        )
+
+    return full_system
+
+
+def solvate_system(
+    source: Union[str, BSS._SireWrappers._system.System],
+    water_model: str = "tip3p",
+    output_file_path: Optional[str] = None,
+    **solvate_kwargs,
+) -> BSS._SireWrappers._system.System:  # type: ignore
+    """
+    Determine an appropriate (rhombic dodecahedron)
+    box size, then solvate the input structure using
+    TIP3P water, adding 150 mM NaCl to the system.
+    The resulting system is saved to the input directory.
+
+    Parameters
+    ----------
+    source : str or System
+        Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System
+    water_model : str
+        Water model to use for solvation (e.g. "tip3p")
+    output_file_path : str
+        file to the output directory where the solvated system will be saved.
+    **solvate_kwargs : dict
+        Additional keyword arguments to pass to the solvation function.
+
+    Returns
+    -------
+    solvated_system : BSS._SireWrappers._system.System
+        Solvated system.
+    """
+    if isinstance(source, str):
+        base_system = BSS.IO.readMolecules(str(source))  # type: ignore
+    else:
+        base_system = source
+
+    solvated_system = _solvate_molecular_system_bss(
+        system=base_system, water_model=water_model, **solvate_kwargs
+    )
+
+    if output_file_path:
+        logger.info(f"Writing solvated system to {output_file_path}")
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        BSS.IO.saveMolecules(
+            str(output_file_path), solvated_system, fileformat=["gro87", "grotop"]
+        )
+
+    return solvated_system
+
+
+def minimise_system(
+    source: Union[str, BSS._SireWrappers._system.System],
+    output_file_path: str,
+    min_steps: int=1_000,
+    mdrun_options: Optional[str] = None,
+) -> BSS._SireWrappers._system.System:  # type: ignore
+    """
+    Minimise the input structure with GROMACS.
+
+    Parameters
+    ----------
+    source : str or System
+        Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System
+    output_file_path : str
+        Path to the output directory where the minimised system will be saved.
+    min_steps : int
+        Number of minimisation steps to perform.
+    mdrun_options : str, optional
+        Additional options to pass to the GROMACS mdrun command.
+
+    Returns
+    -------
+    minimised_system : BSS._SireWrappers._system.System
+        Minimised system.
+    """
+    if isinstance(source, str):
+        solvated_system = BSS.IO.readMolecules(str(source))  # type: ignore
+    else:
+        solvated_system = source
+    
+    # Check that it is actually solvated in a box of water
+    check_has_wat_and_box(solvated_system)
+
+    # Minimise
+    logger.info(f"Minimising input structure with {min_steps} steps...")
+    protocol = BSS.Protocol.Minimisation(steps=min_steps)
+    minimised_system = run_process(
+        system=solvated_system, protocol=protocol, mdrun_options=mdrun_options
+    )
+
+    # Save, renaming the velocity property to foo so avoid saving velocities. Saving the
+    # velocities sometimes causes issues with the size of the floats overflowing the RST7
+    # format.
+    if output_file_path:
+        logger.info(f"Writing solvated system to {output_file_path}")
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        BSS.IO.saveMolecules(
+            str(output_file_path), minimised_system, fileformat=["gro87", "grotop"],
+            property_map={"velocity": "foo"},
+        )
+
+    return minimised_system
+
+
+def preequilibrate_system(
+    source: Union[str, BSS._SireWrappers._system.System],
+    steps: list[dict] = _default_preequilibration_steps_bound,
+    output_file_path: Optional[str] = None,
+    work_dir: Optional[str] = None,
+    mdrun_options: Optional[str] = None,
+) -> BSS._SireWrappers._system.System:  # type: ignore
+    """
+    Load a solvated system (from a file or already-loaded System), perform a sequence 
+    of NVT/NPT equilibration steps, and optionally save the final System.
+
+    Parameters
+    ----------
+    source : str or System
+        Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System.
+    steps : Sequence[EquilStep]
+        A list of equilibration steps. Each step is a tuple:
+            (runtime_ps, temperature_k, restraint, pressure_atm)
+        Use None for pressure_atm to perform NVT.
+    output_path : Optional[str]
+        If provided, writes the final System to this path (e.g. "out/preequil.gro").
+    work_dir : Optional[str]
+        Directory to run GROMACS in. If None, a temp directory is created.
+    mdrun_options : Optional[str]
+        Extra mdrun flags as a single string (e.g. "-nt 4 -v").
+
+    Returns
+    -------
+    System
+        The equilibrated BioSimSpace System.
+    """
+    if isinstance(source, str):
+        system = BSS.IO.readMolecules(str(source))  # type: ignore
+    else:
+        system = source
+
+    # Check that it is solvated and has a box
+    check_has_wat_and_box(system)
+
+    # 3. Iterate equilibration steps
+    preeq_system = system
+    for _param_dict in steps:
+        runtime = _param_dict["runtime"]
+        temperature = _param_dict["temperature"]
+        # if isinstance(temperature, tuple):
+        #     logger.info(f"Running equilibration at {temperature[0]} to {temperature[1]} K")
+        #     start_temperature = temperature[0]
+        #     end_temperature = temperature[1]
+    
+        restraint = _param_dict["restraint"]
+        pressure = _param_dict["pressure"]
+ 
+        logger.info(
+            f"Running equilibration step: {runtime} ps, {temperature} k, restraint={restraint}, pressure={pressure} atm",
+        )
+        preeq_system = _heat_and_preequil_system_bss(
+            system=preeq_system,
+            runtime_ps=runtime,
+            temperature_k=temperature,
+            restraint=restraint,
+            pressure_atm=pressure,
+            work_dir=work_dir,
+            mdrun_options=mdrun_options,
+        )
+
+    if output_file_path:
+        logger.info(f"Writing pre-equilibrated system to {output_file_path}")
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        BSS.IO.saveMolecules(
+            str(output_file_path), preeq_system, fileformat=["gro87", "grotop"]
+        )
+
+    return preeq_system
+
+
+
+def _heat_and_preequil_system_bss(system: BSS._SireWrappers._system.System,
+                                  runtime_ps: float,
+                                  temperature_k: float,
+                                  restraint: str, 
+                                  pressure_atm: float = 1.0,
+                                  work_dir: Optional[str] = None,
+                                  mdrun_options: Optional[str] = None,
+                                  ) -> BSS._SireWrappers._system.System:  # type: ignore
+    """
+    Pure equilibration: run through a single NVT/NPT step.
+    """
+    protocol = BSS.Protocol.Equilibration(
+            runtime = runtime_ps * BSS.Units.Time.picosecond,
+            temperature = temperature_k * BSS.Units.Temperature.kelvin,
+            pressure = (pressure_atm * BSS.Units.Pressure.atm) if pressure_atm is not None else None,
+            restraint = restraint,
+        )
+    heated_system = run_process(system=system, protocol=protocol, work_dir=work_dir, mdrun_options=mdrun_options)
+
+    return heated_system
+
+
+
+def run_process(
+    system: BSS._SireWrappers._system.System,
+    protocol: BSS.Protocol._protocol.Protocol,
+    work_dir: Optional[str] = None,
+    mdrun_options: Optional[str] = None,
+) -> BSS._SireWrappers._system.System:
+    """
+    Run a process with GROMACS, raising informative
+    errors in the event of a failure.
+
+
+    Parameters
+    ----------
+    system : BSS._SireWrappers._system.System
+        System to run the process on.
+    protocol : BSS._Protocol._protocol.Protocol
+        Protocol to run the process with.
+    work_dir : str, optional
+        The working directory to run the process in. If none,
+        a temporary directory will be created.
+    mdrun_options : str, optional
+        Additional options to pass to the GROMACS mdrun command.
+        If `mdrun_options` is provided (e.g. "-nt 4 -v"), it will be split
+        and passed as arguments.
+
+    Returns
+    -------
+    system : BSS._SireWrappers._system.System
+    """
+    process = BSS.Process.Gromacs(system, protocol, work_dir=work_dir)
+
+    # Added by JJ-2025-05-05 for local run on Mac
+    if mdrun_options:
+        args = mdrun_options.split()
+        for flag, val in zip(args[::2], args[1::2]):
+            process.setArg(flag, val)
+
+    process.start()
+    process.wait()
+
+    time.sleep(10)
+    if process.isError():
+        logger.error(process.stdout())
+        logger.error(process.stderr())
+        process.getStdout()
+        process.getStderr()
+        raise BSS._Exceptions.ThirdPartyError("The process failed.")
+    
+    system = process.getSystem(block=True)
+    if system is None:
+        logger.error(process.stdout())
+        logger.error(process.stderr())
+        process.getStdout()
+        process.getStderr()
+        raise BSS._Exceptions.ThirdPartyError("The final system is None.")
+
+    return system
+
 
 
 def _parameterise_water(
@@ -202,89 +581,6 @@ def _parameterise_protein(
     return system
 
 
-def parameterise_system(
-    *,
-    protein_path: Optional[str] = None,
-    ligand_path: Optional[str] = None,
-    water_path: Optional[str] = None,
-    protein_ff: str = "ff14SB",
-    ligand_ff: str = "openff_unconstrained-2.0.0",
-    water_ff: str = "ff14SB",
-    water_model: str = "tip3p",
-    output_file_path: Optional[str] = None,
-) -> BSS._SireWrappers._system.System:  # type: ignore
-    """
-    Parameterise and assemble a combined System of any subset of protein, ligand and water.
-    must pass at least one of `protein_path`, `ligand_path` or `water_path`.
-
-    Parameters
-    ----------
-    protein_path: str
-        PDB file for the protein (e.g. "protein.pdb").
-    ligand_path: str
-        SDF (or other) file for the ligand (e.g. "ligand.sdf").
-    water_path: str
-        PDB file for crystal waters (e.g. "water.pdb").
-    protein_ff: str
-        Force field for the protein (default "ff14SB").
-    ligand_ff: str
-        Force field for the ligand (default "openff_unconstrained-2.0.0").
-    water_ff: str
-        Force field for waters (default "ff14SB").
-    water_model: str
-        Water model identifier (default "tip3p").
-    output_file_path: str
-        If provided, writes the combined system out in GROMACS formats.
-
-    Returns
-    -------
-    System
-        The assembled, parameterised BioSimSpace System.
-    """
-    components = []
-
-    if protein_path:
-        prot_sys = _parameterise_protein(
-            file_path=protein_path,
-            forcefield=protein_ff,
-        )
-        components.append(prot_sys)
-
-    if ligand_path:
-        lig_sys = _parameterise_ligand(
-            file_path=ligand_path,
-            forcefield=ligand_ff,
-        )
-        components.append(lig_sys)
-
-    if water_path:
-        wat_sys = _parameterise_water(
-            file_path=water_path,
-            forcefield=water_ff,
-            water_model=water_model,
-        )
-        components.append(wat_sys)
-
-    if not components:
-        raise ValueError(
-            "Must supply at least one of protein_path, ligand_path or water_path!"
-        )
-
-    # Assemble into one System
-    full_system = components[0]
-    for sys_part in components[1:]:
-        full_system += sys_part  # only works for different molecules
-
-    if output_file_path:
-        logger.info(f"Writing assembled system to {output_file_path}")
-        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-        BSS.IO.saveMolecules(
-            str(output_file_path), full_system, fileformat=["gro87", "grotop"]
-        )
-
-    return full_system
-
-
 def _solvate_molecular_system_bss(
     system: BSS._SireWrappers._system.System,
     water_model: str,
@@ -374,267 +670,6 @@ def _solvate_molecular_system_bss(
 
     return solvated_system
 
-
-def solvate_system(
-    file_path: str,
-    water_model: str = "tip3p",
-    output_file_path: Optional[str] = None,
-    **solvate_kwargs,
-) -> BSS._SireWrappers._system.System:  # type: ignore
-    """
-    Determine an appropriate (rhombic dodecahedron)
-    box size, then solvate the input structure using
-    TIP3P water, adding 150 mM NaCl to the system.
-    The resulting system is saved to the input directory.
-
-    Parameters
-    ----------
-    file_path : str
-        Path to the input structure file.
-    water_model : str
-        Water model to use for solvation (e.g. "tip3p")
-    output_file_path : str
-        file to the output directory where the solvated system will be saved.
-    **solvate_kwargs : dict
-        Additional keyword arguments to pass to the solvation function.
-
-    Returns
-    -------
-    solvated_system : BSS._SireWrappers._system.System
-        Solvated system.
-    """
-    base_system = BSS.IO.readMolecules(file_path)  # type: ignore
-
-    solvated_system = _solvate_molecular_system_bss(
-        system=base_system, water_model=water_model, **solvate_kwargs
-    )
-
-    if output_file_path:
-        logger.info(f"Writing solvated system to {output_file_path}")
-        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-        BSS.IO.saveMolecules(
-            str(output_file_path), solvated_system, fileformat=["gro87", "grotop"]
-        )
-
-    return solvated_system
-
-
-def minimise_system(
-    file_path: str,
-    output_file_path: str,
-    min_steps: int=1_000,
-    slurm: bool = True,
-    mdrun_options: Optional[str] = None,
-) -> BSS._SireWrappers._system.System:  # type: ignore
-    """
-    Minimise the input structure with GROMACS.
-
-    Parameters
-    ----------
-    file_path : str
-        Path to the input structure file.
-    output_file_path : str
-        Path to the output directory where the minimised system will be saved.
-    min_steps : int
-        Number of minimisation steps to perform.
-    slurm : bool
-        Whether to use SLURM for the minimisation.
-    mdrun_options : str, optional
-        Additional options to pass to the GROMACS mdrun command.
-
-    Returns
-    -------
-    minimised_system : BSS._SireWrappers._system.System
-        Minimised system.
-    """
-    solvated_system = BSS.IO.readMolecules(list(file_path))  # returns a System
-    # Check that it is actually solvated in a box of water
-    check_has_wat_and_box(solvated_system)
-
-    # Minimise
-    logger.info(f"Minimising input structure with {min_steps} steps...")
-    protocol = BSS.Protocol.Minimisation(steps=min_steps)
-    minimised_system = run_process(
-        system=solvated_system, protocol=protocol, mdrun_options=mdrun_options
-    )
-
-    # Save, renaming the velocity property to foo so avoid saving velocities. Saving the
-    # velocities sometimes causes issues with the size of the floats overflowing the RST7
-    # format.
-    if output_file_path:
-        logger.info(f"Writing solvated system to {output_file_path}")
-        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-        BSS.IO.saveMolecules(
-            str(output_file_path), minimised_system, fileformat=["gro87", "grotop"],
-            property_map={"velocity": "foo"},
-        )
-
-    return minimised_system
-
-
-def heat_and_preequil_input(
-    leg_type: LegType,
-    input_dir: str,
-    output_dir: str,
-    slurm: bool = True,
-) -> BSS._SireWrappers._system.System:  # type: ignore
-    """
-    Heat the input structure from 0 to 298.15 K with GROMACS.
-
-    Parameters
-    ----------
-    leg_type : LegType
-        The type of the leg.
-    input_dir : str
-        The path to the input directory, where the required files are located.
-    output_dir : str
-        The path to the output directory, where the files will be saved.
-
-    Returns
-    -------
-    preequilibrated_system : BSS._SireWrappers._system.System
-        Pre-Equilibrated system.
-    """
-    cfg = SystemPreparationConfig.from_pickle(input_dir, leg_type)
-
-    # Load the minimised system
-    logger.info("Loading minimised system...")
-    minimised_system = BSS.IO.readMolecules(
-        [
-            f"{input_dir}/{file}"
-            for file in PreparationStage.MINIMISED.get_simulation_input_files(leg_type)
-        ]
-    )
-
-    # Check that it is solvated and has a box
-    check_has_wat_and_box(minimised_system)
-
-    logger.info(
-        f"NVT equilibration for {cfg.runtime_short_nvt} ps while restraining all non-solvent atoms"
-    )
-    protocol = BSS.Protocol.Equilibration(
-        runtime=cfg.runtime_short_nvt * BSS.Units.Time.picosecond,
-        temperature_start=0 * BSS.Units.Temperature.kelvin,
-        temperature_end=cfg.end_temp * BSS.Units.Temperature.kelvin,
-        restraint="all",
-    )
-    equil1 = run_process(system=minimised_system, protocol=protocol, leg_type=leg_type)
-
-    # If this is the bound leg, carry out step with backbone restraints
-    if leg_type == LegType.BOUND:
-        logger.info(
-            f"NVT equilibration for {cfg.runtime_nvt} ps while restraining all backbone atoms"
-        )
-        protocol = BSS.Protocol.Equilibration(
-            runtime=cfg.runtime_nvt * BSS.Units.Time.picosecond,
-            temperature=cfg.end_temp * BSS.Units.Temperature.kelvin,
-            restraint="backbone",
-        )
-        equil2 = run_process(system=equil1, protocol=protocol, leg_type=leg_type)
-
-    else:  # Free leg - skip the backbone restraint step
-        equil2 = equil1
-
-    logger.info(f"NVT equilibration for {cfg.runtime_nvt} ps without restraints")
-    protocol = BSS.Protocol.Equilibration(
-        runtime=cfg.runtime_nvt * BSS.Units.Time.picosecond,
-        temperature=cfg.end_temp * BSS.Units.Temperature.kelvin,
-    )
-    equil3 = run_process(system=equil2, protocol=protocol, leg_type=leg_type)
-
-    logger.info(
-        f"NPT equilibration for {cfg.runtime_npt} ps while restraining non-solvent heavy atoms"
-    )
-    protocol = BSS.Protocol.Equilibration(
-        runtime=cfg.runtime_npt * BSS.Units.Time.picosecond,
-        pressure=1 * BSS.Units.Pressure.atm,
-        temperature=cfg.end_temp * BSS.Units.Temperature.kelvin,
-        restraint="heavy",
-    )
-    equil4 = run_process(system=equil3, protocol=protocol, leg_type=leg_type)
-
-    logger.info(
-        f"NPT equilibration for {cfg.runtime_npt_unrestrained} ps without restraints"
-    )
-    protocol = BSS.Protocol.Equilibration(
-        runtime=cfg.runtime_npt_unrestrained * BSS.Units.Time.picosecond,
-        pressure=1 * BSS.Units.Pressure.atm,
-        temperature=cfg.end_temp * BSS.Units.Temperature.kelvin,
-    )
-    preequilibrated_system = run_process(
-        system=equil4, protocol=protocol, leg_type=leg_type
-    )
-
-    # Save, renaming the velocity property to foo so avoid saving velocities. Saving the
-    # velocities sometimes causes issues with the size of the floats overflowing the RST7
-    # format.
-    BSS.IO.saveMolecules(
-        f"{output_dir}/{leg_type.name.lower()}{PreparationStage.PREEQUILIBRATED.file_suffix}",
-        preequilibrated_system,
-        fileformat=["gro87", "grotop"],
-        property_map={"velocity": "foo"},
-    )
-
-    return preequilibrated_system
-
-
-def run_process(
-    system: BSS._SireWrappers._system.System,
-    protocol: BSS.Protocol._protocol.Protocol,
-    work_dir: Optional[str] = None,
-    mdrun_options: Optional[str] = None,
-) -> BSS._SireWrappers._system.System:
-    """
-    Run a process with GROMACS, raising informative
-    errors in the event of a failure.
-
-
-    Parameters
-    ----------
-    system : BSS._SireWrappers._system.System
-        System to run the process on.
-    protocol : BSS._Protocol._protocol.Protocol
-        Protocol to run the process with.
-    work_dir : str, optional
-        The working directory to run the process in. If none,
-        a temporary directory will be created.
-    mdrun_options : str, optional
-        Additional options to pass to the GROMACS mdrun command.
-        If `mdrun_options` is provided (e.g. "-nt 4 -v"), it will be split
-        and passed as arguments.
-
-    Returns
-    -------
-    system : BSS._SireWrappers._system.System
-    """
-    process = BSS.Process.Gromacs(system, protocol, work_dir=work_dir)
-
-    # Added by JJ-2025-05-05 for local run on Mac
-    if mdrun_options:
-        args = mdrun_options.split()
-        for flag, val in zip(args[::2], args[1::2]):
-            process.setArg(flag, val)
-
-    process.start()
-    process.wait()
-
-    time.sleep(10)
-    if process.isError():
-        logger.error(process.stdout())
-        logger.error(process.stderr())
-        process.getStdout()
-        process.getStderr()
-        raise BSS._Exceptions.ThirdPartyError("The process failed.")
-    
-    system = process.getSystem(block=True)
-    if system is None:
-        logger.error(process.stdout())
-        logger.error(process.stderr())
-        process.getStdout()
-        process.getStderr()
-        raise BSS._Exceptions.ThirdPartyError("The final system is None.")
-
-    return system
 
 
 def rename_lig(
