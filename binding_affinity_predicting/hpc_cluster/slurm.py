@@ -38,10 +38,8 @@ def run_slurm(
 
     """
     # Create a virtual queue for the prep jobs
-    virtual_queue = VirtualQueue(
-                log_dir=run_dir, stream_log_level=stream_log_level
-            )
-    
+    virtual_queue = VirtualQueue(log_dir=run_dir, stream_log_level=stream_log_level)
+
     header_lines = []
     # 1) Pull only the SBATCH/#!/bin/bash lines from run_somd.sh
     file_fullpath = os.path.join(run_dir, "run_gmx.sh")
@@ -66,15 +64,11 @@ def run_slurm(
     slurm_script = f"{run_dir}/{job_name}.sh"
     with open(slurm_script, "w") as file:
         file.writelines(header_lines)
-    
+
     logger.debug(f"Wrote SLURM script to {slurm_script}")
 
     # 4) Submit it via virtual queue
-    submit_cmd = [
-        "--chdir", 
-        str(run_dir),
-        str(slurm_script)
-    ]
+    submit_cmd = ["--chdir", str(run_dir), str(slurm_script)]
     slurm_base = get_slurm_file_base(str(slurm_script))
 
     try:

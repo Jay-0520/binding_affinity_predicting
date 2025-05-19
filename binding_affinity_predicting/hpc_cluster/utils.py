@@ -43,10 +43,12 @@ def get_slurm_file_base(slurm_file: str) -> str:
     raise RuntimeError(f"Could not find slurm output file name in {slurm_file}")
 
 
-
 #### Adapted from https://stackoverflow.com/questions/50246304/using-python-decorators-to-retry-request ####
 def retry(
-    times: int, exceptions: tuple[Exception], wait_time: int, logger: Optional[logging.Logger] = None,
+    times: int,
+    exceptions: tuple[Exception],
+    wait_time: int,
+    logger: Optional[logging.Logger] = None,
 ) -> Callable:
     """
     Retry a function a given number of times if the specified exceptions are raised.

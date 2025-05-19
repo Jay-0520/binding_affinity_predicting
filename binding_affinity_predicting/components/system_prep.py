@@ -1,23 +1,16 @@
 import logging
 import os
-import pathlib
-import pathlib as _pathlib
 import pickle as _pkl
 import time
 from typing import Any, Callable, Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
-from BioSimSpace.Sandpit.Exscientia._SireWrappers import \
-    Molecule  # type: ignore[import]
+from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule  # type: ignore[import]
 from pydantic import BaseModel, Field
 from sire.legacy import Mol as SireMol  # type: ignore[import]
 
-from binding_affinity_predicting.components.simulation_base import \
-    SimulationRunner
 from binding_affinity_predicting.components.utils import check_has_wat_and_box
-from binding_affinity_predicting.schemas.enums import (LegType,
-                                                       PreparationStage,
-                                                       StageType)
+from binding_affinity_predicting.schemas.enums import LegType, StageType
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -303,7 +296,8 @@ def preequilibrate_system(
         pressure = _param_dict["pressure"]
 
         logger.info(
-            f"Running equilibration step: {runtime} ps, temperature(start: {temperature_start}, end: {temperature_end}) k, restraint={restraint}, pressure={pressure} atm",
+            f"Running equilibration step: {runtime} ps, temperature(start: {temperature_start}, \
+                end: {temperature_end}) k, restraint={restraint}, pressure={pressure} atm",
         )
         preeq_system = _heat_and_preequil_system_bss(
             system=preeq_system,
@@ -432,7 +426,8 @@ def _parameterise_water(
     output_file_path: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:
     """
-    Parameterise all (crystal) water molecules in a given file using the specified forcefield and water model.
+    Parameterise all (crystal) water molecules in a given file using the specified
+    forcefield and water model.
 
     Parameters
     ----------
@@ -457,7 +452,8 @@ def _parameterise_water(
     # empty or malformatted pdb file results in a BSS error
     waters_sys = BSS.IO.readMolecules(str(file_path))
     logger.info(
-        f"Parameterising {len(waters_sys)} water molecule(s) with forcefield={forcefield}, water_model={water_model}",
+        f"Parameterising {len(waters_sys)} water molecule(s) with forcefield={forcefield}, \
+            water_model={water_model}",
     )
 
     # Parameterise each water and extract the molecule
@@ -523,8 +519,8 @@ def _parameterise_ligand(
         lig_charge = round(lig.charge().value())
         if lig_charge != 0:
             logger.warning(
-                f"Ligand {lig.__str__} has a charge of {lig_charge}. Co-alchemical ion approach will be used."
-                " Ensure that your box is large enough to avoid artefacts."
+                f"Ligand {lig.__str__} has a charge of {lig_charge}. Co-alchemical ion"
+                " approach will be used. Ensure that your box is large enough to avoid artefacts."
             )
         param_args = {"molecule": lig, "forcefield": forcefield}
         # Only include ligand charge if we're using gaff (OpenFF doesn't need it)
@@ -639,7 +635,8 @@ def _solvate_molecular_system_bss(
         raise TypeError("system must be a BioSimSpace System!")
 
     # Determine the box size
-    # Taken from https://github.com/michellab/BioSimSpaceTutorials/blob/main/01_introduction/02_molecular_setup.ipynb
+    # Taken from https://github.com/michellab/BioSimSpaceTutorials/blob/main/01_introduction/\
+    # 02_molecular_setup.ipynb
     # Get the minimium and maximum coordinates of the bounding box that
     # minimally encloses the protein.
     logger.info("Determining optimal box dimension...")

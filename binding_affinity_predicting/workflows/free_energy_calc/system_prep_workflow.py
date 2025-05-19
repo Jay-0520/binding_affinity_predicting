@@ -3,8 +3,7 @@ from pathlib import Path
 from typing import Callable, Union
 
 from binding_affinity_predicting.components import system_prep
-from binding_affinity_predicting.components.simulation_base import \
-    SimulationRunner
+from binding_affinity_predicting.components.simulation_base import SimulationRunner
 from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
 from binding_affinity_predicting.schemas.enums import LegType
 
@@ -44,14 +43,11 @@ def prepare_fep_simulation_system(
             leg_type=leg_type,
             input_dir=run_dir,
             output_dir=run_dir,
-            slurm=False  # Important: the called function shouldn't spawn another SLURM job
+            slurm=False,  # Important: the called function shouldn't spawn another SLURM job
         )
     else:
         system_prep.minimise_input(
-            leg_type=leg_type,
-            input_dir=run_dir,
-            output_dir=run_dir,
-            slurm=False
+            leg_type=leg_type, input_dir=run_dir, output_dir=run_dir, slurm=False
         )
 
     # 4. Heat & Pre-equil
@@ -65,14 +61,11 @@ def prepare_fep_simulation_system(
             leg_type=leg_type,
             input_dir=run_dir,
             output_dir=run_dir,
-            slurm=False  # Don't nest SLURM submissions
+            slurm=False,  # Don't nest SLURM submissions
         )
     else:
         system_prep.heat_and_preequil_input(
-            leg_type=leg_type,
-            input_dir=run_dir,
-            output_dir=run_dir,
-            slurm=False
+            leg_type=leg_type, input_dir=run_dir, output_dir=run_dir, slurm=False
         )
 
     logger.info("All steps complete!")

@@ -1,8 +1,7 @@
 from pathlib import Path
 
 from binding_affinity_predicting.components.simulation import Simulation
-from binding_affinity_predicting.components.simulation_base import \
-    SimulationRunner
+from binding_affinity_predicting.components.simulation_base import SimulationRunner
 
 
 class LambdaWindow(SimulationRunner):

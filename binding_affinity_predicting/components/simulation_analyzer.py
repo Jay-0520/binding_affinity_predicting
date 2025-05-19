@@ -13,8 +13,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
-from binding_affinity_predicting.components.simulation_base import \
-    SimulationRunner
+from binding_affinity_predicting.components.simulation_base import SimulationRunner
 
 logger = logging.getLogger(__name__)
 

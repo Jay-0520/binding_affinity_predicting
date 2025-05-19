@@ -17,7 +17,7 @@ def check_has_wat_and_box(system: BSS._SireWrappers._system.System) -> None:  # 
         raise ValueError("System does not have a box.")
     if system.nWaterMolecules() == 0:
         raise ValueError("System does not have water.")
-    
+
 
 def load_simulation_state(update_paths: bool = True) -> None:
     """Load the state of the simulation object from a pickle file, and do
