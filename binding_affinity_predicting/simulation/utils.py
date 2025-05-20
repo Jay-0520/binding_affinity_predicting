@@ -77,7 +77,7 @@ def run_process(
 
 def rename_lig(
     bss_system: BSS._SireWrappers._system.System, new_name: str = "LIG"
-) -> None:  # type: ignore
+) -> None:
     """Rename the ligand in a BSS system.
 
     Parameters
@@ -102,8 +102,8 @@ def rename_lig(
     mol_edit = mol_sire.edit()
 
     # Rename the molecule and the residue to the supplied name
-    resname = SireMol.ResName(new_name)  # type: ignore
-    mol_edit = mol_edit.residue(SireMol.ResIdx(0)).rename(resname).molecule()  # type: ignore
+    resname = SireMol.ResName(new_name)
+    mol_edit = mol_edit.residue(SireMol.ResIdx(0)).rename(resname).molecule()
     mol_edit = mol_edit.edit().rename(new_name).molecule()
 
     # Commit the changes and update the system

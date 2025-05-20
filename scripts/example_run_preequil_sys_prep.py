@@ -1,6 +1,7 @@
 import logging
 import os
 
+from binding_affinity_predicting.components.utils import save_workflow_config
 from binding_affinity_predicting.data.schemas import (
     EnergyMinimisationConfig,
     EquilStep,
@@ -53,6 +54,12 @@ system = prepare_preequil_molecular_system(
     ligand_path=os.path.join(output_dir, "ligand.sdf"),
     output_dir=output_dir,
     use_slurm=cfg.slurm,
+)
+
+# Save the workflow config to a file
+save_workflow_config(
+    cfg,
+    os.path.join(output_dir, "workflow_config.pkl"),
 )
 
 logger.info("Done all steps successfully.")
