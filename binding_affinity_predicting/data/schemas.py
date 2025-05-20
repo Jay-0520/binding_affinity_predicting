@@ -1,4 +1,5 @@
 import logging
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -13,6 +14,12 @@ class RunnerConfig:
     dg_multiplier: int = 1
     ensemble_size: int = 5
     dump: bool = True
+
+
+class SimulationRestraint(str, Enum):
+    ALL = "all"
+    BACKBONE = "backbone"
+    HEAVY = "heavy"
 
 
 class SystemPreparationConfig(BaseModel):
@@ -35,7 +42,7 @@ class SystemPreparationConfig(BaseModel):
         validate_assignment = True
 
 
-class EquilStep(BaseModel):
+class PreEquilStageConfig(BaseModel):
     """
     One NVT/NPT equilibration step.
     Units: runtime (ps), temperature (K), restraint (all|backbone|heavy), pressure (atm).
@@ -44,8 +51,8 @@ class EquilStep(BaseModel):
     runtime: float
     temperature_start: float
     temperature_end: float
-    restraint: Optional[str]
-    pressure: Optional[float]
+    restraint: Optional[SimulationRestraint]  # restraint can be None or a string
+    pressure: Optional[float]  # pressure can be float or a string
 
     class Config:
         extra = "forbid"
@@ -55,37 +62,37 @@ class EquilStep(BaseModel):
 class PreEquilibrationConfig(BaseModel):
     """Config block for all pre-equilibration steps."""
 
-    steps: list[EquilStep] = Field(
+    steps: list[PreEquilStageConfig] = Field(
         default_factory=lambda: [
-            EquilStep(
+            PreEquilStageConfig(
                 runtime=5,
                 temperature_start=0.0,
                 temperature_end=298.15,
-                restraint="all",
+                restraint=SimulationRestraint.ALL,
                 pressure=None,
             ),
-            EquilStep(
+            PreEquilStageConfig(
                 runtime=10,
                 temperature_start=298.15,
                 temperature_end=298.15,
-                restraint="backbone",
+                restraint=SimulationRestraint.BACKBONE,
                 pressure=None,
             ),
-            EquilStep(
+            PreEquilStageConfig(
                 runtime=10,
                 temperature_start=298.15,
                 temperature_end=298.15,
                 restraint=None,
                 pressure=None,
             ),
-            EquilStep(
+            PreEquilStageConfig(
                 runtime=10,
                 temperature_start=298.15,
                 temperature_end=298.15,
-                restraint="heavy",
+                restraint=SimulationRestraint.HEAVY,
                 pressure=1.0,
             ),
-            EquilStep(
+            PreEquilStageConfig(
                 runtime=10,
                 temperature_start=298.15,
                 temperature_end=298.15,
@@ -211,7 +218,22 @@ class FepSimulationConfig(BaseModel):
         description="Whether to use the same restraints for all repeats of the bound leg. Note "
         "that this should be used if you plan to run adaptively.",
     )
-    ensemble_equilibration_time: int = Field(5000, gt=0, lt=50_000)  # ps
+
+    class Config:
+        extra = "forbid"
+        validate_assignment = True
+
+
+class EnsembleEquilibrationConfig(BaseModel):
+    """
+    Configuration for the ensemble equilibration.
+    """
+
+    runtime: int = Field(5, gt=0, lt=50_000)  # nanoseconds
+    timestep: int = Field(2, gt=0, lt=10_000)  # fs
+    temperature: Optional[float]
+    restraint: Optional[str]
+    pressure: Optional[float]
 
     class Config:
         extra = "forbid"
@@ -230,6 +252,9 @@ class WorkflowConfig(BaseModel):
     )
     param_energy_minimisation: EnergyMinimisationConfig = Field(
         default_factory=EnergyMinimisationConfig
+    )
+    param_ensemble_equilibration: EnsembleEquilibrationConfig = Field(
+        default_factory=EnsembleEquilibrationConfig
     )
     param_fep_params: FepSimulationConfig = Field(default_factory=FepSimulationConfig)
 

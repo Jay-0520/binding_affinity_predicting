@@ -7,7 +7,7 @@ import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 from binding_affinity_predicting.data.schemas import WorkflowConfig
 from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
 from binding_affinity_predicting.simulation.parameterise import parameterise_system
-from binding_affinity_predicting.simulation.preequilibraiton import (
+from binding_affinity_predicting.simulation.preequilibration import (
     energy_minimise_system,
     preequilibrate_system,
 )

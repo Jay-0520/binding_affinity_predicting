@@ -4,8 +4,9 @@ import os
 from binding_affinity_predicting.components.utils import save_workflow_config
 from binding_affinity_predicting.data.schemas import (
     EnergyMinimisationConfig,
-    EquilStep,
     PreEquilibrationConfig,
+    PreEquilStageConfig,
+    SimulationRestraint,
     WorkflowConfig,
 )
 from binding_affinity_predicting.workflows.free_energy_calc.system_prep_workflow import (
@@ -16,18 +17,18 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 custom_steps = [
-    EquilStep(
+    PreEquilStageConfig(
         runtime=2.0,
         temperature_start=298.15,
         temperature_end=298.15,
-        restraint="all",
+        restraint=SimulationRestraint.ALL,
         pressure=None,
     ),
-    EquilStep(
+    PreEquilStageConfig(
         runtime=2.0,
         temperature_start=298.15,
         temperature_end=298.15,
-        restraint="backbone",
+        restraint=SimulationRestraint.BACKBONE,
         pressure=None,
     ),
 ]
