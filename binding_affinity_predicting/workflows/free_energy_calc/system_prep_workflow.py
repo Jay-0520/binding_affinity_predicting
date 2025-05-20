@@ -4,8 +4,6 @@ from typing import Optional
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.data.enums import LegType
 from binding_affinity_predicting.data.schemas import WorkflowConfig
 from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
 from binding_affinity_predicting.simulation.parameterise import parameterise_system
@@ -25,7 +23,7 @@ def prepare_preequil_molecular_system(
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
     water_path: Optional[str] = None,
-    output_dir: Optional[str] = None,
+    output_dir: str,
     use_slurm: bool = True,
 ) -> BSS._SireWrappers._system.System:
     """
@@ -40,7 +38,7 @@ def prepare_preequil_molecular_system(
     os.makedirs(output_dir, exist_ok=True)
 
     # ── 1) PARAMETERISE ──────────────────────────────────────────────────
-    logger.info("Step 1: Parameterise")
+    logger.info("Step 1: Parameterise the system...")
     system_parameterised = parameterise_system(
         protein_path=protein_path,
         ligand_path=ligand_path,
@@ -53,7 +51,7 @@ def prepare_preequil_molecular_system(
     )
 
     # ── 2) SOLVATE ──────────────────────────────────────────────────────
-    logger.info("Step 2: Solvate")
+    logger.info("Step 2: Solvate the system...")
     system_solvated = solvate_system(
         source=system_parameterised,
         water_model=config.param_system_prep.water_model,
@@ -62,7 +60,7 @@ def prepare_preequil_molecular_system(
     )
 
     # ── 3) ENERGY MINIMISE ─────────────────────────────────────────────────────
-    logger.info("Step 3: Minimise")
+    logger.info("Step 3: Energy minimise the system...")
     energy_min_out = os.path.join(output_dir, "system_energy_min.gro")
     min_kwargs = dict(
         source=system_solvated,
@@ -75,7 +73,7 @@ def prepare_preequil_molecular_system(
             sys_prep_fn=energy_minimise_system,
             wait=True,
             run_dir=output_dir,
-            job_name=f"minimise_system",
+            job_name="minimise_system",
             **min_kwargs,
         )
         # once the SLURM job finishes, reload from file
@@ -89,7 +87,7 @@ def prepare_preequil_molecular_system(
         )
 
     # ── 4) PRE-EQUILIBRATE ───────────────────────────────────────────────
-    logger.info("Step 4: Pre-equilibrate")
+    logger.info("Step 4: Pre-equilibrate the system...")
     preequil_out = os.path.join(output_dir, "system_preequiled.gro")
     preequil_kwargs = dict(
         source=system_energy_min,
@@ -104,7 +102,7 @@ def prepare_preequil_molecular_system(
             sys_prep_fn=preequilibrate_system,
             wait=True,
             run_dir=output_dir,
-            job_name=f"preequil_system",
+            job_name="preequil_system",
             **preequil_kwargs,
         )
         system_preequil = BSS.IO.readMolecules(preequil_out)

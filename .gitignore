@@ -1,3 +1,4 @@
 # ignore all egg-info dirs
+__pycache__/
 *.egg-info/
 .flake8

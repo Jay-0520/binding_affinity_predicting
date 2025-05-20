@@ -1,10 +1,11 @@
 import logging
 import os
-from typing import Any, Optional, Union
+from typing import Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
 from binding_affinity_predicting.components.utils import check_has_wat_and_box
+from binding_affinity_predicting.data.schemas import EquilStep
 from binding_affinity_predicting.simulation.utils import run_process
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ def energy_minimise_system(
 
 def preequilibrate_system(
     source: Union[str, BSS._SireWrappers._system.System],
-    steps: Optional[dict[str, Any]] = None,
+    steps: Optional[Sequence[Union[EquilStep, dict]]] = None,
     output_file_path: Optional[str] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
@@ -107,18 +108,33 @@ def preequilibrate_system(
     # Check that it is solvated and has a box
     check_has_wat_and_box(system)
 
-    # 3. Iterate equilibration steps
+    # if no steps, just return the system
+    if not steps:
+        logger.warning("No equilibration steps provided; returning input system.")
+        return system
+
+    # normalize every step into an EquilStep
+    normalized: list[EquilStep] = []
+    for s in steps:
+        if isinstance(s, EquilStep):
+            normalized.append(s)
+        elif isinstance(s, dict):
+            normalized.append(EquilStep.model_validate(s))
+        else:
+            raise TypeError(f"Each step must be EquilStep or dict, got {type(s)}.")
+
+    # iterate equilibration steps
     preeq_system = system
-    for _param_dict in steps:
-        runtime = _param_dict["runtime"]
-        temperature_start = _param_dict["temperature_start"]
-        temperature_end = _param_dict["temperature_end"]
-        restraint = _param_dict["restraint"]
-        pressure = _param_dict["pressure"]
+    for _step_param in normalized:
+        runtime = _step_param.runtime
+        temperature_start = _step_param.temperature_start
+        temperature_end = _step_param.temperature_end
+        restraint = _step_param.restraint
+        pressure = _step_param.pressure
 
         logger.info(
-            f"Running equilibration step: {runtime} ps, temperature(start: {temperature_start}, \
-                end: {temperature_end}) k, restraint={restraint}, pressure={pressure} atm",
+            f"Running equilibration step: {runtime} ps, temperature {temperature_start}"
+            "->{temperature_end} k, restraint={restraint}, pressure={pressure} atm"
         )
         preeq_system = _heat_and_preequil_system_bss(
             system=preeq_system,
@@ -146,8 +162,8 @@ def _heat_and_preequil_system_bss(
     runtime_ps: float,
     temperature_start_k: float,
     temperature_end_k: float,
-    restraint: str,
-    pressure_atm: float = 1.0,
+    restraint: Optional[str] = None,
+    pressure_atm: Optional[float] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
@@ -167,11 +183,7 @@ def _heat_and_preequil_system_bss(
         runtime=runtime_ps,
         temperature_start=temperature_start_k,
         temperature_end=temperature_end_k,
-        pressure=(
-            (pressure_atm * BSS.Units.Pressure.atm)
-            if pressure_atm is not None
-            else None
-        ),
+        pressure=pressure_atm,
         restraint=restraint,
     )
     heated_system = run_process(
