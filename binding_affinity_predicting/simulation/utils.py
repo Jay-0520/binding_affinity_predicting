@@ -14,6 +14,7 @@ def run_process(
     system: BSS._SireWrappers._system.System,
     protocol: BSS.Protocol._protocol.Protocol,
     work_dir: Optional[str] = None,
+    process_name: Optional[str] = None,
     mdrun_options: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:
     """
@@ -30,6 +31,9 @@ def run_process(
     work_dir : str, optional
         The working directory to run the process in. If none,
         a temporary directory will be created.
+    process_name : str, optional
+        The name of the process. If none, a default name "gromacs" will be used.
+        NOTE that {work_dir}/{process_name}.xtc/gro/edr/log defines the output files
     mdrun_options : str, optional
         Additional options to pass to the GROMACS mdrun command.
         If `mdrun_options` is provided (e.g. "-nt 4 -v"), it will be split
@@ -39,7 +43,9 @@ def run_process(
     -------
     system : BSS._SireWrappers._system.System
     """
-    process = BSS.Process.Gromacs(system, protocol, work_dir=work_dir)
+    process = BSS.Process.Gromacs(
+        system, protocol, work_dir=work_dir, name=process_name
+    )
 
     # Added by JJ-2025-05-05 for local run on Mac
     if mdrun_options:

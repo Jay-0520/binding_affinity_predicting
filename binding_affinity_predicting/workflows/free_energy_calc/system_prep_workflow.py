@@ -20,6 +20,7 @@ logger.setLevel(logging.INFO)
 def prepare_preequil_molecular_system(
     *,
     config: WorkflowConfig = WorkflowConfig(),
+    output_filename: str,
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
     water_path: Optional[str] = None,
@@ -33,6 +34,23 @@ def prepare_preequil_molecular_system(
     2) Solvate
     3) Minimise
     4) Pre-equilibrate
+
+    Parameters
+    ----------
+    config : WorkflowConfig
+        Configuration object containing the parameters for the workflow.
+    output_filename : str
+        The name of the output file (without extension).
+    protein_path : str, optional
+        Path to the protein structure file (PDB/GRO/etc).
+    ligand_path : str, optional
+        Path to the ligand structure file (PDB/GRO/etc).
+    water_path : str, optional
+        Path to the water structure file (PDB/GRO/etc).
+    output_dir : str
+        Directory where the output files will be saved.
+    use_slurm : bool, default True
+        If True, run the workflow using SLURM. If False, run locally.
     """
     # ensure base output exists
     os.makedirs(output_dir, exist_ok=True)
@@ -47,7 +65,7 @@ def prepare_preequil_molecular_system(
         ligand_ff=config.param_system_prep.forcefields["ligand"],
         water_ff=config.param_system_prep.forcefields["water"],
         water_model=config.param_system_prep.water_model,
-        output_file_path=os.path.join(output_dir, "system.gro"),
+        output_file_path=os.path.join(output_dir, f"{output_filename}.gro"),
     )
 
     # ── 2) SOLVATE ──────────────────────────────────────────────────────
@@ -56,17 +74,18 @@ def prepare_preequil_molecular_system(
         source=system_parameterised,
         water_model=config.param_system_prep.water_model,
         ion_conc=config.param_system_prep.ion_conc,
-        output_file_path=os.path.join(output_dir, "system_solvated.gro"),
+        output_file_path=os.path.join(output_dir, f"{output_filename}_solvated.gro"),
     )
 
     # ── 3) ENERGY MINIMISE ─────────────────────────────────────────────────────
     logger.info("Step 3: Energy minimise the system...")
-    energy_min_out = os.path.join(output_dir, "system_energy_min.gro")
+    energy_min_out = os.path.join(output_dir, f"{output_filename}_energy_min.gro")
     min_kwargs = dict(
         source=system_solvated,
         output_file_path=energy_min_out,
         min_steps=config.param_energy_minimisation.steps,
         mdrun_options=config.mdrun_options,
+        process_name="minimise_system",
     )
     if use_slurm:
         run_slurm(
@@ -79,22 +98,18 @@ def prepare_preequil_molecular_system(
         # once the SLURM job finishes, reload from file
         system_energy_min = BSS.IO.readMolecules(energy_min_out)
     else:
-        system_energy_min = energy_minimise_system(
-            source=system_solvated,
-            output_file_path=os.path.join(output_dir, "system_energy_min.gro"),
-            min_steps=config.param_energy_minimisation.steps,
-            mdrun_options=config.mdrun_options,
-        )
+        system_energy_min = energy_minimise_system(**min_kwargs)
 
     # ── 4) PRE-EQUILIBRATE ───────────────────────────────────────────────
     logger.info("Step 4: Pre-equilibrate the system...")
-    preequil_out = os.path.join(output_dir, "system_preequiled.gro")
+    preequil_out = os.path.join(output_dir, f"{output_filename}_preequiled.gro")
     preequil_kwargs = dict(
         source=system_energy_min,
         steps=config.param_preequilibration.steps,
         work_dir=output_dir,
         mdrun_options=config.mdrun_options,
         output_file_path=preequil_out,
+        process_name="preequil_system",
     )
 
     if use_slurm:
@@ -107,13 +122,7 @@ def prepare_preequil_molecular_system(
         )
         system_preequil = BSS.IO.readMolecules(preequil_out)
     else:
-        system_preequil = preequilibrate_system(
-            source=system_energy_min,
-            steps=config.param_preequilibration.steps,
-            work_dir=output_dir,  # run GROMACS in this folder
-            mdrun_options=config.mdrun_options,
-            output_file_path=os.path.join(output_dir, "system_preequiled.gro"),
-        )
+        system_preequil = preequilibrate_system(**preequil_kwargs)
 
     logger.info("All steps complete!")
     return system_preequil

@@ -17,6 +17,7 @@ def energy_minimise_system(
     output_file_path: str,
     min_steps: int = 1_000,
     mdrun_options: Optional[str] = None,
+    process_name: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
     Minimise the input structure with GROMACS.
@@ -49,7 +50,10 @@ def energy_minimise_system(
     logger.info(f"Minimising input structure with {min_steps} steps...")
     protocol = BSS.Protocol.Minimisation(steps=min_steps)
     minimised_system = run_process(
-        system=solvated_system, protocol=protocol, mdrun_options=mdrun_options
+        system=solvated_system,
+        protocol=protocol,
+        mdrun_options=mdrun_options,
+        process_name=process_name,
     )
 
     # Save, renaming the velocity property to foo so avoid saving velocities. Saving the
@@ -74,6 +78,7 @@ def preequilibrate_system(
     output_file_path: Optional[str] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
+    process_name: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
     Load a solvated system (from a file or already-loaded System), perform a sequence
@@ -145,6 +150,7 @@ def preequilibrate_system(
             pressure_atm=pressure,
             work_dir=work_dir,
             mdrun_options=mdrun_options,
+            process_name=process_name,
         )
 
     if output_file_path:
@@ -166,9 +172,31 @@ def _heat_and_preequil_system_bss(
     pressure_atm: Optional[float] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
+    process_name: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
     Pure equilibration: run through a single NVT/NPT step.
+
+    Parameters
+    ----------
+    system : BioSimSpace._SireWrappers._system.System
+        A BioSimSpace System (e.g. returned by BSS.IO.readMolecules).
+    runtime_ps : float
+        Runtime in picoseconds.
+    temperature_start_k : float
+        Starting temperature in Kelvin.
+    temperature_end_k : float
+        Ending temperature in Kelvin.
+    restraint : Optional[str]
+        Restraint type (e.g. "harmonic").
+    pressure_atm : Optional[float]
+        Pressure in atm. If None, NVT is performed.
+    work_dir : Optional[str]
+        Directory to run GROMACS in. If None, a temp directory is created.
+    mdrun_options : Optional[str]
+        Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
+    process_name : Optional[str]
+        Name of the process. If None, a default name "gromacs" will be used.
     """
     # convert to BSS units
     runtime_ps = runtime_ps * BSS.Units.Time.picosecond
@@ -187,7 +215,11 @@ def _heat_and_preequil_system_bss(
         restraint=restraint,
     )
     heated_system = run_process(
-        system=system, protocol=protocol, work_dir=work_dir, mdrun_options=mdrun_options
+        system=system,
+        protocol=protocol,
+        work_dir=work_dir,
+        mdrun_options=mdrun_options,
+        process_name=process_name,
     )
 
     return heated_system
