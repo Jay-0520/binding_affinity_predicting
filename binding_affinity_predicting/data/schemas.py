@@ -1,15 +1,8 @@
 import logging
-import os
-import pickle as _pkl
-import time
-from typing import Any, Callable, Optional, Union
+from typing import Optional
 
-import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
-from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule  # type: ignore[import]
 from pydantic import BaseModel, Field
-from sire.legacy import Mol as SireMol  # type: ignore[import]
 
-from binding_affinity_predicting.components.utils import check_has_wat_and_box
 from binding_affinity_predicting.data.enums import LegType, StageType
 
 logger = logging.getLogger(__name__)
@@ -242,7 +235,7 @@ class WorkflowConfig(BaseModel):
 
     # Added by JJ-2025-05-05
     mdrun_options: Optional[str] = Field(
-        None, description="Extra flags for 'gmx mdrun' (e.g., '-ntmpi 1 -ntomp 8')."
+        None, description="Extra flags for 'gmx mdrun' (e.g., '-ntmpi 1 -ntomp 1')."
     )
 
     class Config:

@@ -32,6 +32,8 @@ def energy_minimise_system(
         Number of minimisation steps to perform.
     mdrun_options : str, optional
         Additional options to pass to the GROMACS mdrun command.
+    process_name : Optional[str]
+        Name of the process. If None, a default name "gromacs" will be used.
 
     Returns
     -------
@@ -98,8 +100,9 @@ def preequilibrate_system(
     work_dir : Optional[str]
         Directory to run GROMACS in. If None, a temp directory is created.
     mdrun_options : Optional[str]
-        Extra mdrun flags as a single string (e.g. "-nt 4 -v").
-
+        Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
+    process_name : Optional[str]
+        Name of the process. If None, a default name "gromacs" will be used.
     Returns
     -------
     System
@@ -139,7 +142,7 @@ def preequilibrate_system(
 
         logger.info(
             f"Running equilibration step: {runtime} ps, temperature {temperature_start}"
-            "->{temperature_end} k, restraint={restraint}, pressure={pressure} atm"
+            f"->{temperature_end} k, restraint={restraint}, pressure={pressure} atm"
         )
         preeq_system = _heat_and_preequil_system_bss(
             system=preeq_system,
@@ -188,7 +191,7 @@ def _heat_and_preequil_system_bss(
     temperature_end_k : float
         Ending temperature in Kelvin.
     restraint : Optional[str]
-        Restraint type (e.g. "harmonic").
+        Restraint type (e.g. "backbone", "heavy").
     pressure_atm : Optional[float]
         Pressure in atm. If None, NVT is performed.
     work_dir : Optional[str]

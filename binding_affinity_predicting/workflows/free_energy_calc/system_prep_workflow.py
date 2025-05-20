@@ -19,8 +19,8 @@ logger.setLevel(logging.INFO)
 
 def prepare_preequil_molecular_system(
     *,
+    output_nametag: str,
     config: WorkflowConfig = WorkflowConfig(),
-    output_filename: str,
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
     water_path: Optional[str] = None,
@@ -39,8 +39,9 @@ def prepare_preequil_molecular_system(
     ----------
     config : WorkflowConfig
         Configuration object containing the parameters for the workflow.
-    output_filename : str
+    output_nametag : str
         The name of the output file (without extension).
+        e.g. "complex" will create "complex.gro".
     protein_path : str, optional
         Path to the protein structure file (PDB/GRO/etc).
     ligand_path : str, optional
@@ -65,7 +66,7 @@ def prepare_preequil_molecular_system(
         ligand_ff=config.param_system_prep.forcefields["ligand"],
         water_ff=config.param_system_prep.forcefields["water"],
         water_model=config.param_system_prep.water_model,
-        output_file_path=os.path.join(output_dir, f"{output_filename}.gro"),
+        output_file_path=os.path.join(output_dir, f"{output_nametag}.gro"),
     )
 
     # ── 2) SOLVATE ──────────────────────────────────────────────────────
@@ -74,12 +75,12 @@ def prepare_preequil_molecular_system(
         source=system_parameterised,
         water_model=config.param_system_prep.water_model,
         ion_conc=config.param_system_prep.ion_conc,
-        output_file_path=os.path.join(output_dir, f"{output_filename}_solvated.gro"),
+        output_file_path=os.path.join(output_dir, f"{output_nametag}_solvated.gro"),
     )
 
     # ── 3) ENERGY MINIMISE ─────────────────────────────────────────────────────
     logger.info("Step 3: Energy minimise the system...")
-    energy_min_out = os.path.join(output_dir, f"{output_filename}_energy_min.gro")
+    energy_min_out = os.path.join(output_dir, f"{output_nametag}_energy_min.gro")
     min_kwargs = dict(
         source=system_solvated,
         output_file_path=energy_min_out,
@@ -102,7 +103,7 @@ def prepare_preequil_molecular_system(
 
     # ── 4) PRE-EQUILIBRATE ───────────────────────────────────────────────
     logger.info("Step 4: Pre-equilibrate the system...")
-    preequil_out = os.path.join(output_dir, f"{output_filename}_preequiled.gro")
+    preequil_out = os.path.join(output_dir, f"{output_nametag}_preequiled.gro")
     preequil_kwargs = dict(
         source=system_energy_min,
         steps=config.param_preequilibration.steps,
