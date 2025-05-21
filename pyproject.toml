@@ -55,6 +55,7 @@ skip-string-normalization = true
 
 [tool.mypy]
 python_version = "3.11"
+plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
 
 
