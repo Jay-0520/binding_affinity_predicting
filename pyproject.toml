@@ -45,6 +45,7 @@ dev = [
     "black",
     "flake8",
     "mypy",
+    "pydantic[mypy]",
 ]
 
 [tool.black]

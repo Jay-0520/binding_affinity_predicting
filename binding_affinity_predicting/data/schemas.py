@@ -34,7 +34,7 @@ class SystemPreparationConfig(BaseModel):
             "water": "tip3p",
         }
     )
-    water_model: str = "tip3p"
+    water_model: str = Field("tip3p", description="Water model to use.")
     ion_conc: float = Field(0.15, ge=0, lt=1)  # Mnit: M or mol/L
 
     class Config:
@@ -231,9 +231,9 @@ class EnsembleEquilibrationConfig(BaseModel):
 
     runtime: int = Field(5, gt=0, lt=50_000)  # nanoseconds
     timestep: int = Field(2, gt=0, lt=10_000)  # fs
-    temperature: Optional[float]
-    restraint: Optional[str]
-    pressure: Optional[float]
+    temperature: Optional[float] = Field(300)
+    restraint: Optional[str] = None
+    pressure: Optional[float] = Field(1.0)  # atm
 
     class Config:
         extra = "forbid"
@@ -244,19 +244,13 @@ class WorkflowConfig(BaseModel):
     """Top-level configuration for entire system prep workflow."""
 
     slurm: bool = True
-    param_system_prep: SystemPreparationConfig = Field(
-        default_factory=SystemPreparationConfig
+    param_system_prep: SystemPreparationConfig = SystemPreparationConfig()
+    param_preequilibration: PreEquilibrationConfig = PreEquilibrationConfig()
+    param_energy_minimisation: EnergyMinimisationConfig = EnergyMinimisationConfig()
+    param_ensemble_equilibration: EnsembleEquilibrationConfig = (
+        EnsembleEquilibrationConfig()
     )
-    param_preequilibration: PreEquilibrationConfig = Field(
-        default_factory=PreEquilibrationConfig
-    )
-    param_energy_minimisation: EnergyMinimisationConfig = Field(
-        default_factory=EnergyMinimisationConfig
-    )
-    param_ensemble_equilibration: EnsembleEquilibrationConfig = Field(
-        default_factory=EnsembleEquilibrationConfig
-    )
-    param_fep_params: FepSimulationConfig = Field(default_factory=FepSimulationConfig)
+    param_fep_params: FepSimulationConfig = FepSimulationConfig()
 
     # Added by JJ-2025-05-05
     mdrun_options: Optional[str] = Field(
