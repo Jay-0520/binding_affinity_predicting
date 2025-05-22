@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 from typing import Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
@@ -9,7 +10,7 @@ from binding_affinity_predicting.data.schemas import (
     EnsembleEquilibrationConfig,
     PreEquilStageConfig,
 )
-from binding_affinity_predicting.simulation.utils import run_process
+from binding_affinity_predicting.simulation.utils import decouple_ligand_in_system, run_process
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -88,7 +89,7 @@ def preequilibrate_system(
     output_file_path: Optional[str] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
-    process_name: Optional[str] = None,
+    process_name: str = "preequilibration",
     **extra_protocol_kwargs,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -242,12 +243,12 @@ def _heat_and_preequil_system_bss(
     return heated_system
 
 
-def _equilibrate_system_bss(
+def _equilibrating_system_bss(
     system: BSS._SireWrappers._system.System,
     runtime_ns: float,  # NOTE unit is changed to ns here in BSS
-    temperature_k: float,
-    pressure_atm: Optional[float] = None,
-    restraint: Optional[str] = None,
+    temperature_k: float = 300.0,
+    pressure_atm: float = 1.0,
+    timestep_fs: float = 2,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
     process_name: Optional[str] = None,
@@ -255,19 +256,56 @@ def _equilibrate_system_bss(
 ) -> BSS._SireWrappers._system.System:
     """
     Run a single NVT/NPT equilibration step using the Production protocol.
+
+    NOTE that for biological system, it's mostly NPT (300K and 1 atm)
+
+    Parameters
+    ----------
+    system : BioSimSpace._SireWrappers._system.System
+        A BioSimSpace System (e.g. returned by BSS.IO.readMolecules).
+    runtime_ns : float; Runtime in nanoseconds.
+    temperature_k : float; Temperature in Kelvin.
+    pressure_atm : Optional[float]
+        Pressure in atm. If None, NVT is performed.
+    timestep_fs : Optional[float]
+        Timestep in femtoseconds. If None, the default timestep is used.
+    work_dir : Optional[str]
+        Directory to run GROMACS in. If None, a temp directory is created.
+    mdrun_options : Optional[str]
+        Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
+    process_name : Optional[str]
+        Name of the process. If None, a default name "gromacs" will be used.
+        NOTE that {work_dir}/{process_name}.xtc/gro/edr/log defines the output files
+    **extra_protocol_kwargs
+        Any additional named arguments to pass into `BSS.Protocol.Production`
+
+    Returns
+    -------
+    System
+        The equilibrated BioSimSpace System.
     """
+    # Check that it is solvated in a box of water
+    check_has_wat_and_box(system)
+
     # convert to BSS units
     runtime_ns = runtime_ns * BSS.Units.Time.nanosecond
     temperature_k = temperature_k * BSS.Units.Temperature.kelvin
+    timestep_fs = (
+        timestep_fs * BSS.Units.Time.femtosecond if timestep_fs is not None else None
+    )
     pressure_atm = (
         pressure_atm * BSS.Units.Pressure.atm if pressure_atm is not None else None
     )
+
+    # decouple the ligand in the system
+    # TODO: we don't need to decouple the ligand here, move this to a separate step in the workflow
+    system = decouple_ligand_in_system(system)
 
     protocol = BSS.Protocol.Production(
         runtime=runtime_ns,
         temperature=temperature_k,
         pressure=pressure_atm,
-        restraint=restraint,
+        timestep=timestep_fs,
         **extra_protocol_kwargs,
     )
 
@@ -289,11 +327,14 @@ def run_ensemble_equilibration(
     output_file_path: Optional[str] = None,
     work_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
-    process_name: Optional[str] = None,
+    process_name: str = "ensemble_equilibration",
     **extra_protocol_kwargs,
-) -> BSS._SireWrappers._system.System:
+) -> list[BSS._SireWrappers._system.System]:
     """
     Run an ensemble of equilibration simulations by using BSS.Protocol.Production.
+
+    Note that in A3FE protocol, this step is only needed for BOUND leg
+    see ref: https://pubs.acs.org/doi/10.1021/acs.jctc.4c00806
 
     Parameters
     ----------
@@ -314,138 +355,51 @@ def run_ensemble_equilibration(
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Equilibration`
     """
+    if isinstance(source, str):
+        base_system = BSS.IO.readMolecules(source)
+    else:
+        base_system = source
 
-    # launch a ensemble of replicates
-    for i in range(1, replicas + 1):
-        logger.info(f"Launching replicate {i}/{replicas}...")
-        _equilibrate_system_bss(
-            system=source,
-            runtime_ps=5,
-            temperature_k=298.15,
-            pressure_atm=1,
-            restraint=None,
-            work_dir=work_dir,
+    # normalize every step into an EquilStep
+    configs: list[EnsembleEquilibrationConfig] = []
+    for s in replicas:
+        if isinstance(s, EnsembleEquilibrationConfig):
+            configs.append(s)
+        elif isinstance(s, dict):
+            configs.append(EnsembleEquilibrationConfig.model_validate(s))
+        else:
+            raise TypeError(f"Each step must be EquilStep or dict, got {type(s)}.")
+
+    # run each replicate
+    systems = []
+    for ndx, _repeat in enumerate(configs, start=1):
+        logger.info(f"Launching replicate equilibration run {ndx}/{len(configs)}...")
+
+        if work_dir:
+            rep_dir = os.path.join(work_dir, f"ensemble_equilibration_{ndx}")
+            os.makedirs(rep_dir, exist_ok=True)
+        else:
+            rep_dir = tempfile.mkdtemp(prefix=f"{process_name}_{ndx}_")
+
+        pname = f"{process_name}_{ndx}"
+        equilibrated_system_out = _equilibrating_system_bss(
+            system=base_system,
+            runtime_ps=_repeat.runtime,
+            temperature_k=_repeat.temperature,
+            pressure_atm=_repeat.pressure,
+            restraint=_repeat.restraint,
+            timestep_fs=_repeat.timestep,
+            work_dir=rep_dir,
             mdrun_options=mdrun_options,
-            process_name=f"eb_{i}",
+            process_name=pname,
             **extra_protocol_kwargs,
         )
+        systems.append(equilibrated_system_out)
 
-    # Check if we have already run any ensemble equilibration simulations
-    outdirs_to_run = [outdir for outdir in outdirs if not _os.path.isdir(outdir)]
-    outdirs_already_run = [outdir for outdir in outdirs if _os.path.isdir(outdir)]
-    self._logger.info(
-        f"Found {len(outdirs_already_run)} ensemble equilibration directories already run."
-    )
-
-    for outdir in outdirs_to_run:
-        _subprocess.run(["mkdir", "-p", outdir], check=True)
-        for input_file in [
-            f"{self.input_dir}/{ifile}"
-            for ifile in _PreparationStage.PREEQUILIBRATED.get_simulation_input_files(
-                self.leg_type
-            )
-        ]:
-            _subprocess.run(["cp", "-r", input_file, outdir], check=True)
-
-        # Also write a pickle of the config to the output directory
-        sysprep_config.save_pickle(outdir, self.leg_type)
-
-    if sysprep_config.slurm:
-        if self.leg_type == _LegType.BOUND:
-            job_name = "ensemble_equil_bound"
-            fn = _system_prep.slurm_ensemble_equilibration_bound
-        elif self.leg_type == _LegType.FREE:
-            job_name = "ensemble_equil_free"
-            fn = _system_prep.slurm_ensemble_equilibration_free
-        else:
-            raise ValueError("Invalid leg type.")
-
-        # For each ensemble member to be run, run a 5 ns simulation in a seperate directory
-
-        for i, outdir in enumerate(outdirs_to_run):
-            self._logger.info(
-                f"Running ensemble equilibration {i + 1} of {len(outdirs_to_run)}. Submitting through SLURM..."
-            )
-            self._run_slurm(fn, wait=False, run_dir=outdir, job_name=job_name)
-
-        self.virtual_queue.wait()  # Wait for all jobs to finish
-
-        # Check that the required input files have been produced, since slurm can fail silently
-        for i, outdir in enumerate(outdirs_to_run):
-            for file in _PreparationStage.PREEQUILIBRATED.get_simulation_input_files(
-                self.leg_type
-            ) + ["somd.rst7"]:
-                if not _os.path.isfile(f"{outdir}/{file}"):
-                    raise RuntimeError(
-                        f"SLURM job failed to produce {file}. Please check the output of the "
-                        f"last slurm log in {outdir} directory for errors."
-                    )
-
-    else:  # Not slurm
-        for i, outdir in enumerate(outdirs_to_run):
-            self._logger.info(
-                f"Running ensemble equilibration {i + 1} of {len(outdirs_to_run)}..."
-            )
-            _system_prep.run_ensemble_equilibration(
-                self.leg_type,
-                outdir,
-                outdir,
-            )
-
-    # Give the output files unique names
-    equil_numbers = [int(outdir.split("_")[-1]) for outdir in outdirs_to_run]
-    for equil_number, outdir in zip(equil_numbers, outdirs_to_run):
-        _subprocess.run(
-            ["mv", f"{outdir}/somd.rst7", f"{outdir}/somd_{equil_number}.rst7"],
-            check=True,
+        out_gro = os.path.join(rep_dir, f"{pname}.gro")
+        logger.info(f"Saving replicate {ndx} system to {out_gro}")
+        BSS.IO.saveMolecules(
+            str(out_gro), equilibrated_system_out, fileformat=["gro87", "grotop"]
         )
 
-    # Load the system and mark the ligand to be decoupled
-    self._logger.info("Loading pre-equilibrated system...")
-    pre_equilibrated_system = _BSS.IO.readMolecules(
-        [
-            f"{self.input_dir}/{file}"
-            for file in _PreparationStage.PREEQUILIBRATED.get_simulation_input_files(
-                self.leg_type
-            )
-        ]
-    )
-
-    # Mark the ligand to be decoupled so the restraints searching algorithm works
-    lig = _BSS.Align.decouple(pre_equilibrated_system[0], intramol=True)
-    pre_equilibrated_system.updateMolecule(0, lig)
-
-    # If this is the bound leg, search for restraints
-    if self.leg_type == _LegType.BOUND:
-        # For each run, load the trajectory and extract the restraints
-        for i, outdir in enumerate(outdirs):
-            self._logger.info(f"Loading trajectory for run {i + 1}...")
-            top_file = f"{self.input_dir}/{_PreparationStage.PREEQUILIBRATED.get_simulation_input_files(self.leg_type)[0]}"
-            traj = _BSS.Trajectory.Trajectory(
-                topology=top_file,
-                trajectory=f"{outdir}/gromacs.xtc",
-                system=pre_equilibrated_system,
-            )
-            self._logger.info(f"Selecting restraints for run {i + 1}...")
-            restraint = _BSS.FreeEnergy.RestraintSearch.analyse(
-                method="BSS",
-                system=pre_equilibrated_system,
-                traj=traj,
-                work_dir=outdir,
-                temperature=298.15 * _BSS.Units.Temperature.kelvin,
-                append_to_ligand_selection=sysprep_config.append_to_ligand_selection,
-            )
-
-            # Check that we actually generated a restraint
-            if restraint is None:
-                raise ValueError(f"No restraints found for run {i + 1}.")
-
-            # Save the restraints to a text file and store within the Leg object
-            with open(f"{outdir}/restraint_{i + 1}.txt", "w") as f:
-                f.write(restraint.toString(engine="SOMD"))  # type: ignore
-            self.restraints.append(restraint)
-
-        return pre_equilibrated_system
-
-    else:  # Free leg
-        return pre_equilibrated_system
+    return systems

@@ -231,9 +231,9 @@ class EnsembleEquilibrationConfig(BaseModel):
 
     runtime: int = Field(5, gt=0, lt=50_000)  # nanoseconds
     timestep: int = Field(2, gt=0, lt=10_000)  # fs
-    temperature: Optional[float] = Field(300)
+    temperature: float = Field(300)
+    pressure: float = Field(1.0)  # atm
     restraint: Optional[str] = None
-    pressure: Optional[float] = Field(1.0)  # atm
 
     class Config:
         extra = "forbid"

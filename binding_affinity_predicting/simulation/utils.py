@@ -109,3 +109,61 @@ def rename_lig(
     # Commit the changes and update the system
     mol._sire_object = mol_edit.commit()
     bss_system.updateMolecule(0, mol)
+
+
+def decouple_ligand_in_system(
+    system: BSS._SireWrappers._system.System,
+    ligand_resname: str = "LIG",
+    min_atoms: int = 5,
+    max_atoms: int = 100,
+) -> BSS._SireWrappers._system.System:
+    """
+    Locate the ligand molecule in a BioSimSpace System by residue name
+    decouple it, replace it in the system, and return the modified system.
+
+    Parameters
+    ----------
+    system
+        A BSS System containing protein, ligand, waters, etc.
+    ligand_resname
+        The residue name to look for first (e.g. "LIG").
+    min_atoms, max_atoms
+        Fallback atom‐count heuristic if no molecule is named ligand_resname.
+
+    Returns
+    -------
+    system
+        The same System object, with the ligand molecule decoupled via BSS.Align.decouple.
+    """
+    n_mols = system.nMolecules()
+    ligand_idx = None
+
+    # try explicit residue‐name match
+    for i in range(n_mols):
+        mol = system[i]
+        try:
+            name = mol._sire_object.residue(0).name().value()
+        except Exception:
+            continue
+        if name == ligand_resname:
+            ligand_idx = i
+            break
+
+    if ligand_idx is None:
+        raise ValueError(
+            f"Could not identify ligand: no residue named '{ligand_resname}'."
+        )
+
+    # ) Decouple & replace
+    lig = BSS.Align.decouple(system[ligand_idx], intramol=True)
+
+    # Check if the decoupled molecule is a ligand based on molecule size
+    if not (min_atoms < lig.nAtoms() < max_atoms):
+        raise ValueError(
+            f"Decoupled molecule at index {ligand_idx} has {lig.nAtoms()} atoms; "
+            "does not look like a ligand."
+        )
+    # TODO: not sure why we need this - by JJH-2025-05-22; it seems align.decouple() 
+    # may mess up the indexing?
+    system.updateMolecule(ligand_idx, lig)
+    return system
