@@ -1,6 +1,7 @@
+import glob
 import logging
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
@@ -10,8 +11,12 @@ from binding_affinity_predicting.simulation.parameterise import parameterise_sys
 from binding_affinity_predicting.simulation.preequilibration import (
     energy_minimise_system,
     preequilibrate_system,
+    run_ensemble_equilibration,
 )
-from binding_affinity_predicting.simulation.system_preparation import solvate_system
+from binding_affinity_predicting.simulation.system_preparation import (
+    extract_restraint_from_traj,
+    solvate_system,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -126,6 +131,73 @@ def prepare_preequil_molecular_system(
 
     logger.info("All steps complete!")
     return system_preequil
+
+
+def prepare_ensemble_equilibration_replicas(
+    *,
+    source: Union[str, BSS._SireWrappers._system.System],
+    output_basename: str,
+    config: BaseWorkflowConfig = BaseWorkflowConfig(),
+    **extra_protocol_kwargs,
+) -> tuple[
+    list[BSS._SireWrappers._system.System], list[BSS.FreeEnergy._restraint.Restraint]
+]:
+    """
+    Run ensemble equilibration for the given system and
+    extract restraints from trajectory for each replica.
+    """
+    # 1. Run the actual BSS equilibration
+    replicas = config.param_ensemble_equilibration.replicas
+    logger.info(f"Running ensemble equilibration with {len(replicas)} replicas...")
+
+    system_list = run_ensemble_equilibration(
+        source=source,
+        replicas=replicas,
+        output_basename=output_basename,
+        mdrun_options=config.mdrun_options,
+        process_name="run_ensemble_equilibration",
+        **extra_protocol_kwargs,
+    )
+
+    # 2. Now loop over each replicate and extract its restraint
+    logger.info("Extracting restraints from each replica...")
+    dir_name = os.path.dirname(output_basename) or os.getcwd()
+    restraint_list = []
+    for idx in range(1, len(system_list) + 1):
+        rep_dir = os.path.join(dir_name, f"ensemble_equilibration_{idx}")
+
+        # grab the exactly one .xtc
+        trajs = glob.glob(os.path.join(rep_dir, "*.xtc"))
+        if len(trajs) != 1:
+            raise RuntimeError(
+                f"Expected 1 trajectory in {rep_dir}, but found {len(trajs)}."
+            )
+        trajectory_file = trajs[0]
+
+        # grab the exactly one .top
+        tops = glob.glob(os.path.join(rep_dir, "*.top"))
+        if len(tops) != 1:
+            raise RuntimeError(
+                f"Expected 1 topology in {rep_dir}, but found {len(tops)}."
+            )
+        topology_file = tops[0]
+
+        # use the temperature from the previous replica run
+        temperature_equil = config.param_ensemble_equilibration.replicas[
+            idx - 1
+        ].temperature
+        restraint = extract_restraint_from_traj(
+            work_dir=rep_dir,
+            trajectory_file=trajectory_file,
+            topology_file=topology_file,
+            system=system_list[idx - 1],
+            output_filename=f"restraint_{idx}.txt",
+            temperature=temperature_equil,
+            append_to_ligand_selection=config.append_to_ligand_selection,
+        )
+        restraint_list.append(restraint)
+
+    return system_list, restraint_list
 
 
 def prepare_fep_simulation_systems():

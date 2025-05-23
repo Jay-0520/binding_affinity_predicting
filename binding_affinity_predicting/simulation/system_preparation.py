@@ -159,7 +159,7 @@ def extract_restraint_from_traj(
     topology_file: str,
     system: BSS._SireWrappers._system.System,
     output_filename: Optional[str] = None,
-    temperature: float = 298.15,
+    temperature: float = 300.0,
     append_to_ligand_selection: str = "",
 ) -> BSS.FreeEnergy._restraint.Restraint:  # type: ignore
     """

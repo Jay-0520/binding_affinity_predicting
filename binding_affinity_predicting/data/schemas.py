@@ -2,7 +2,7 @@ import logging
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from binding_affinity_predicting.data.enums import LegType, StageType
 
@@ -35,7 +35,7 @@ class SystemPreparationConfig(BaseModel):
         }
     )
     water_model: str = Field("tip3p", description="Water model to use.")
-    ion_conc: float = Field(0.15, ge=0, lt=1)  # Mnit: M or mol/L
+    ion_conc: float = Field(0.15, ge=0, lt=1)
 
     class Config:
         extra = "forbid"
@@ -215,10 +215,6 @@ class FepSimulationConfig(BaseModel):
             },
         }
     )
-    append_to_ligand_selection: str = Field(
-        "",
-        description="Atom selection to append to the ligand selection during restraint searching.",
-    )
     use_same_restraints: bool = Field(
         True,
         description="Whether to use the same restraints for all repeats of the bound leg. Note "
@@ -239,11 +235,30 @@ class EnsembleEquilibrationReplicaConfig(BaseModel):
     timestep: float = Field(2.0, gt=0, lt=10_000)  # fs
     temperature: float = Field(300)
     pressure: float = Field(1.0)  # atm
-    restraint: Optional[str] = None
+    restraint: Optional[SimulationRestraint] = (
+        None  # only "all", "backbone", "heavy" are allowed
+    )
 
     class Config:
         extra = "forbid"
         validate_assignment = True
+
+
+class EnsembleEquilibrationConfig(BaseModel):
+    num_replicas: int = Field(5)  # number of replicas for ensemble equilibration
+    # Optional[list[EnsembleEquilibrationReplicaConfig]] = None -> mypy always treats it as None
+    # at runtime, even though @model_validator fills it in so got a mypy error (len(None))
+    replicas: list[EnsembleEquilibrationReplicaConfig] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    def _fill_in_replicas(cls, values):
+        n = values.get("num_replicas", 5)
+        # only populate if they didn’t explicitly supply any replicas
+        if values.get("replicas") is None:
+            values["replicas"] = [
+                EnsembleEquilibrationReplicaConfig() for _ in range(n)
+            ]
+        return values
 
 
 # TODO: create a CustomWorkflowConfig ?
@@ -253,18 +268,33 @@ class BaseWorkflowConfig(BaseModel):
 
     This procedure is based on workflow from this paper:
     https://pubs.acs.org/doi/10.1021/acs.jctc.4c00806
+
+    Try using default_factory callable that runs on every instantiation ->
+    brand-new default value each time, but maybe not needed
     """
 
     slurm: bool = True
-    param_system_prep: SystemPreparationConfig = SystemPreparationConfig()
-    param_preequilibration: EmpiricalPreEquilibrationConfig = (
-        EmpiricalPreEquilibrationConfig()
+    # Need to add # type: ignore[call-arg] because mypy does not recognize __init__() properly
+    param_system_prep: SystemPreparationConfig = Field(
+        default_factory=lambda: SystemPreparationConfig()
+    )  # type: ignore[call-arg]
+    param_preequilibration: EmpiricalPreEquilibrationConfig = Field(
+        default_factory=lambda: EmpiricalPreEquilibrationConfig()  # type: ignore[call-arg]
     )
-    param_energy_minimisation: EnergyMinimisationConfig = EnergyMinimisationConfig()
-    param_ensemble_equilibration: EnsembleEquilibrationReplicaConfig = (
-        EnsembleEquilibrationReplicaConfig()
+    param_energy_minimisation: EnergyMinimisationConfig = Field(
+        default_factory=lambda: EnergyMinimisationConfig()
+    )  # type: ignore[call-arg]
+    param_ensemble_equilibration: EnsembleEquilibrationConfig = Field(
+        default_factory=lambda: EnsembleEquilibrationConfig()  # type: ignore[call-arg]
     )
-    param_fep_params: FepSimulationConfig = FepSimulationConfig()
+    param_fep_params: FepSimulationConfig = Field(
+        default_factory=lambda: FepSimulationConfig()
+    )  # type: ignore[call-arg]
+
+    append_to_ligand_selection: str = Field(
+        "",
+        description="Atom selection to append to the ligand selection during restraint searching.",
+    )
 
     # Added by JJ-2025-05-05
     mdrun_options: Optional[str] = Field(

@@ -402,14 +402,17 @@ def run_ensemble_equilibration(
     systems = []
     for ndx, _repeat in enumerate(configs, start=1):
         logger.info(
-            f"Launching enssemble equilibration (via BSS.Protocol.Production)"
-            f"run {ndx}/{len(configs)}..."
+            f"Launching ensemble equilibration (via BSS.Protocol.Production)"
+            f" run {ndx}/{len(configs)}...at runtime={_repeat.runtime} ns"
+            f" timestep={_repeat.timestep} fs, temperature={_repeat.temperature} K"
+            f" restraint={_repeat.restraint}, pressure={_repeat.pressure} atm"
         )
 
         # Must load a fresh system for each replica because BSS system is mutable in place
         system_copy = load_fresh_system(source)
 
         if base_work_dir:
+            # hard-coded the folder name here
             work_dir = os.path.join(base_work_dir, f"ensemble_equilibration_{ndx}")
             os.makedirs(work_dir, exist_ok=True)
         else:
