@@ -369,6 +369,7 @@ def run_ensemble_equilibration(
             in the directory "a/b/c".
         2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
             current directory.
+        And GROMACS simulation files are stored in ensemble_equilibration_<ndx> directory
     work_dir : Optional[str]
         Directory to run GROMACS in. If None, a temp directory is created.
     mdrun_options : Optional[str]
