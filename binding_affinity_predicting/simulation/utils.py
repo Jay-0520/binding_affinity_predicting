@@ -121,7 +121,8 @@ def decouple_ligand_in_system(
 ) -> BSS._SireWrappers._system.System:
     """
     Locate the ligand molecule in a BioSimSpace System by residue name
-    decouple it, replace it in the system, and return the modified system.
+    decouple it if not already decoupled, replace/update it in the system,
+    and return the modified system.
 
     Parameters
     ----------
@@ -151,15 +152,32 @@ def decouple_ligand_in_system(
             ligand_idx = i
             break
 
+    # try fallback based on size
+    if ligand_idx is None:
+        for i in range(n_mols):
+            na = system[i].nAtoms()
+            if min_atoms < na < max_atoms:
+                if ligand_idx is not None:
+                    raise ValueError(f"Multiple ligand candidates ({ligand_idx}, {i})")
+                ligand_idx = i
+
     if ligand_idx is None:
         raise ValueError(
-            f"Could not identify ligand: no residue named '{ligand_resname}'."
+            f"Could not identify ligand: no residue named '{ligand_resname}' "
+            f"and no molecule in {min_atoms}–{max_atoms} atoms."
         )
 
-    # ) Decouple & replace
-    lig = BSS.Align.decouple(system[ligand_idx], intramol=True)
+    # Decouple & replace
+    try:
+        lig = BSS.Align.decouple(system[ligand_idx], intramol=True)
+    except Exception as e:
+        msg = str(e).lower()
+        if "already been decoupled" in msg or "isdecoupled" in msg:
+            logger.warning("Ligand already decoupled, skipping.")
+            return system
+        raise e
 
-    # Check if the decoupled molecule is a ligand based on molecule size
+    # sanity check based on molecule size
     if not (min_atoms < lig.nAtoms() < max_atoms):
         raise ValueError(
             f"Decoupled molecule at index {ligand_idx} has {lig.nAtoms()} atoms; "
