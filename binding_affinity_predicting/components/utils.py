@@ -6,13 +6,13 @@ from typing import Any
 
 import BioSimSpace.Sandpit.Exscientia as BSS
 
-from binding_affinity_predicting.data.schemas import WorkflowConfig
+from binding_affinity_predicting.data.schemas import BaseWorkflowConfig
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def save_workflow_config(cfg: WorkflowConfig, filepath: str) -> None:
+def save_workflow_config(cfg: BaseWorkflowConfig, filepath: str) -> None:
     """
     Serialize a WorkflowConfig out to a pickle file.
 
@@ -31,7 +31,7 @@ def save_workflow_config(cfg: WorkflowConfig, filepath: str) -> None:
         pickle.dump(data, f)
 
 
-def load_workflow_config(filepath: str) -> WorkflowConfig:
+def load_workflow_config(filepath: str) -> BaseWorkflowConfig:
     """
     Load a WorkflowConfig back from a pickle file.
 
@@ -48,7 +48,7 @@ def load_workflow_config(filepath: str) -> WorkflowConfig:
     with open(filepath, "rb") as f:
         data = pickle.load(f)
     # Re-validate and reconstruct the Pydantic model
-    return WorkflowConfig.model_validate(data)
+    return BaseWorkflowConfig.model_validate(data)
 
 
 def check_has_wat_and_box(system: BSS._SireWrappers._system.System) -> None:  # type: ignore

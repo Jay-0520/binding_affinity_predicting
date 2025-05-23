@@ -1,6 +1,8 @@
 import logging
+import os
+import tempfile
 import time
-from typing import Optional
+from typing import Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule  # type: ignore[import]
@@ -163,7 +165,98 @@ def decouple_ligand_in_system(
             f"Decoupled molecule at index {ligand_idx} has {lig.nAtoms()} atoms; "
             "does not look like a ligand."
         )
-    # TODO: not sure why we need this - by JJH-2025-05-22; it seems align.decouple() 
+    # TODO: not sure why we need this - by JJH-2025-05-22; it seems align.decouple()
     # may mess up the indexing?
     system.updateMolecule(ligand_idx, lig)
     return system
+
+
+def save_system_to_local(
+    system: BSS._SireWrappers._system.System,
+    output_basename: Optional[str] = None,
+    fileformat: list[str] = ["gro87", "grotop"],
+    system_nametag_logging: str = "ligand",
+    **save_kwargs,
+) -> None:
+    """
+    If output_basename is set, writes out `<basename>.gro` and `<basename>.top`
+    and logs "Writing {logger_info} system to".
+
+    output_basename : Optional[str]
+       If provided, this base name is used for both GROMACS outputs. Any extension
+        the user includes will be ignored, and two files will be written:
+        Usage:
+        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
+            in the directory "a/b/c".
+        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
+            current directory.
+
+    Any additional keyword arguments (e.g. `property_map`) will be passed
+    directly through to `BSS.IO.saveMolecules`.
+    """
+    if not output_basename:
+        return
+
+    # ensure directory exists (or fallback to cwd)
+    dir_name = os.path.dirname(output_basename) or os.getcwd()
+    os.makedirs(dir_name, exist_ok=True)
+
+    logger.info(f"Writing {system_nametag_logging} to {dir_name}")
+    # write out two gromacs files, gro and top files
+    BSS.IO.saveMolecules(
+        str(output_basename), system, fileformat=fileformat, **save_kwargs
+    )
+
+
+def load_system_from_source(
+    source: Union[str, BSS._SireWrappers._system.System],
+) -> BSS._SireWrappers._system.System:
+    """
+    Load a BioSimSpace System from disk.
+
+    If `source` is already a System, return it unchanged.
+    If it's a path ending in .gro or .top, assume its partner file
+    (same stem, other extension) lives alongside it and load both.
+    """
+    if not isinstance(source, str):
+        return source
+
+    stem, ext = os.path.splitext(source)
+    ext = ext.lower()
+
+    if ext not in (".gro", ".top"):
+        raise ValueError(f"Expected a GROMACS .gro or .top file, got '{source}'.")
+
+    gro_path = stem + ".gro"
+    top_path = stem + ".top"
+
+    missing = [p for p in (gro_path, top_path) if not os.path.exists(p)]
+    if missing:
+        raise FileNotFoundError(
+            f"Both GRO/TOP files must exist for loading into a BSS system."
+            f"Missing: {', '.join(missing)}"
+        )
+
+    return BSS.IO.readMolecules([gro_path, top_path])
+
+
+def load_fresh_system(
+    source: Union[str, BSS._SireWrappers._system.System],
+) -> BSS._SireWrappers._system.System:
+    """
+    Return a freshly-loaded System for each call.
+
+    - If `source` is a str, delegate to load_system_from_source(().
+    - If `source` is already a System, dump it to a temp GRO/TOP pair
+      and re-load so that further mutations don't affect the original.
+    """
+    if isinstance(source, str):
+        return load_system_from_source(source)
+
+    # source is a System: snapshot to disk then re-load
+    with tempfile.TemporaryDirectory(prefix="bss_sys_") as td:
+        gro_path = os.path.join(td, "temp_system.gro")
+        BSS.IO.saveMolecules(gro_path, source, fileformat=["gro87", "grotop"])
+        fresh = load_system_from_source(source=gro_path)
+
+    return fresh

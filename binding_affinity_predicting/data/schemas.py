@@ -59,8 +59,14 @@ class PreEquilStageConfig(BaseModel):
         validate_assignment = True
 
 
-class PreEquilibrationConfig(BaseModel):
-    """Config block for all pre-equilibration steps."""
+# TODO: maybe move this to somewhere else?
+class EmpiricalPreEquilibrationConfig(BaseModel):
+    """
+    Config block for all pre-equilibration steps.
+
+    This procedure is based on workflow from this paper:
+    https://pubs.acs.org/doi/10.1021/acs.jctc.4c00806
+    """
 
     steps: list[PreEquilStageConfig] = Field(
         default_factory=lambda: [
@@ -224,13 +230,13 @@ class FepSimulationConfig(BaseModel):
         validate_assignment = True
 
 
-class EnsembleEquilibrationConfig(BaseModel):
+class EnsembleEquilibrationReplicaConfig(BaseModel):
     """
-    Configuration for the ensemble equilibration.
+    Configuration for one replica of ensemble-based equilibration.
     """
 
-    runtime: int = Field(5, gt=0, lt=50_000)  # nanoseconds
-    timestep: int = Field(2, gt=0, lt=10_000)  # fs
+    runtime: float = Field(5.0, gt=0, lt=50_000)  # NOTE: it is nanoseconds here
+    timestep: float = Field(2.0, gt=0, lt=10_000)  # fs
     temperature: float = Field(300)
     pressure: float = Field(1.0)  # atm
     restraint: Optional[str] = None
@@ -240,15 +246,23 @@ class EnsembleEquilibrationConfig(BaseModel):
         validate_assignment = True
 
 
-class WorkflowConfig(BaseModel):
-    """Top-level configuration for entire system prep workflow."""
+# TODO: create a CustomWorkflowConfig ?
+class BaseWorkflowConfig(BaseModel):
+    """
+    Top-level configuration for entire system prep workflow.
+
+    This procedure is based on workflow from this paper:
+    https://pubs.acs.org/doi/10.1021/acs.jctc.4c00806
+    """
 
     slurm: bool = True
     param_system_prep: SystemPreparationConfig = SystemPreparationConfig()
-    param_preequilibration: PreEquilibrationConfig = PreEquilibrationConfig()
+    param_preequilibration: EmpiricalPreEquilibrationConfig = (
+        EmpiricalPreEquilibrationConfig()
+    )
     param_energy_minimisation: EnergyMinimisationConfig = EnergyMinimisationConfig()
-    param_ensemble_equilibration: EnsembleEquilibrationConfig = (
-        EnsembleEquilibrationConfig()
+    param_ensemble_equilibration: EnsembleEquilibrationReplicaConfig = (
+        EnsembleEquilibrationReplicaConfig()
     )
     param_fep_params: FepSimulationConfig = FepSimulationConfig()
 

@@ -1,16 +1,21 @@
 import logging
 import os
-import tempfile
 from typing import Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
 from binding_affinity_predicting.components.utils import check_has_wat_and_box
 from binding_affinity_predicting.data.schemas import (
-    EnsembleEquilibrationConfig,
+    EnsembleEquilibrationReplicaConfig,
     PreEquilStageConfig,
 )
-from binding_affinity_predicting.simulation.utils import decouple_ligand_in_system, run_process
+from binding_affinity_predicting.simulation.utils import (
+    decouple_ligand_in_system,
+    load_fresh_system,
+    load_system_from_source,
+    run_process,
+    save_system_to_local,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -18,7 +23,7 @@ logger.setLevel(logging.INFO)
 
 def energy_minimise_system(
     source: Union[str, BSS._SireWrappers._system.System],
-    output_file_path: str,
+    output_basename: Optional[str] = None,
     min_steps: int = 1_000,
     mdrun_options: Optional[str] = None,
     process_name: Optional[str] = None,
@@ -31,15 +36,20 @@ def energy_minimise_system(
     ----------
     source : str or System
         Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System
-    output_file_path : str
-        Path to the output directory where the minimised system will be saved.
+    output_basename : Optional[str]
+       If provided, this base name is used for both GROMACS outputs. Any extension
+        the user includes will be ignored, and two files will be written:
+        Usage:
+        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
+            in the directory "a/b/c".
+        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
+            current directory.
     min_steps : int
         Number of minimisation steps to perform.
     mdrun_options : str, optional
         Additional options to pass to the GROMACS mdrun command.
     process_name : Optional[str]
         Name of the process. If None, a default name "gromacs" will be used.
-        NOTE that {work_dir}/{process_name}.xtc/gro/edr/log defines the output files
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Minimisation`
 
@@ -48,10 +58,14 @@ def energy_minimise_system(
     minimised_system : BSS._SireWrappers._system.System
         Minimised system.
     """
-    if isinstance(source, str):
-        solvated_system = BSS.IO.readMolecules(str(source))  # type: ignore
+    # decide on work_dir only if the user asked to save locally
+    if output_basename:
+        dir_name = os.path.dirname(output_basename) or os.getcwd()
+        work_dir = dir_name
     else:
-        solvated_system = source
+        work_dir = None
+
+    solvated_system = load_system_from_source(source)
 
     # Check that it is actually solvated in a box of water
     check_has_wat_and_box(solvated_system)
@@ -63,22 +77,21 @@ def energy_minimise_system(
     minimised_system = run_process(
         system=solvated_system,
         protocol=protocol,
+        work_dir=work_dir,
         mdrun_options=mdrun_options,
-        process_name=process_name,
+        process_name=process_name,  # {work_dir}/{process_name}.xtc/gro defines the output files
     )
 
-    # Save, renaming the velocity property to foo so avoid saving velocities. Saving the
+    # Save the system to local files if output_basename is provided
+    # renaming the velocity property to foo so avoid saving velocities. Saving the
     # velocities sometimes causes issues with the size of the floats overflowing the RST7
     # format.
-    if output_file_path:
-        logger.info(f"Writing solvated system to {output_file_path}")
-        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-        BSS.IO.saveMolecules(
-            str(output_file_path),
-            minimised_system,
-            fileformat=["gro87", "grotop"],
-            property_map={"velocity": "foo"},
-        )
+    save_system_to_local(
+        system=minimised_system,
+        output_basename=output_basename,
+        system_nametag_logging="minimised system",
+        property_map={"velocity": "foo"},
+    )
 
     return minimised_system
 
@@ -86,8 +99,7 @@ def energy_minimise_system(
 def preequilibrate_system(
     source: Union[str, BSS._SireWrappers._system.System],
     steps: Sequence[Union[PreEquilStageConfig, dict]],
-    output_file_path: Optional[str] = None,
-    work_dir: Optional[str] = None,
+    output_basename: Optional[str] = None,
     mdrun_options: Optional[str] = None,
     process_name: str = "preequilibration",
     **extra_protocol_kwargs,
@@ -105,15 +117,18 @@ def preequilibrate_system(
             (runtime, temperature_start, temperature_end, restraint, pressure)
         see the EquilStep class for details.
         Use None for pressure_atm to perform NVT.
-    output_file_path : Optional[str]
-        If provided, writes the final System to this path (e.g. "out/preequil.gro").
-    work_dir : Optional[str]
-        Directory to run GROMACS in. If None, a temp directory is created.
+    output_basename : Optional[str]
+       If provided, this base name is used for both GROMACS outputs. Any extension
+        the user includes will be ignored, and two files will be written:
+        Usage:
+        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
+            in the directory "a/b/c".
+        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
+            current directory.
     mdrun_options : Optional[str]
         Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
     process_name : Optional[str]
         Name of the process. If None, a default name "gromacs" will be used.
-        NOTE that {work_dir}/{process_name}.xtc/gro/edr/log defines the output files
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Equilibration`
 
@@ -122,10 +137,14 @@ def preequilibrate_system(
     System
         The equilibrated BioSimSpace System.
     """
-    if isinstance(source, str):
-        system = BSS.IO.readMolecules(str(source))  # type: ignore
+    # decide on work_dir only if the user asked to save locally
+    if output_basename:
+        dir_name = os.path.dirname(output_basename) or os.getcwd()
+        work_dir = dir_name
     else:
-        system = source
+        work_dir = None
+
+    system = load_system_from_source(source)
 
     # Check that it is solvated and has a box
     check_has_wat_and_box(system)
@@ -166,12 +185,12 @@ def preequilibrate_system(
             **extra_protocol_kwargs,
         )
 
-    if output_file_path:
-        logger.info(f"Writing pre-equilibrated system to {output_file_path}")
-        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-        BSS.IO.saveMolecules(
-            str(output_file_path), preeq_system, fileformat=["gro87", "grotop"]
-        )
+    # Save the system to local files if output_basename is provided
+    save_system_to_local(
+        system=preeq_system,
+        output_basename=output_basename,
+        system_nametag_logging="pre-equilibrated system",
+    )
 
     return preeq_system
 
@@ -236,7 +255,7 @@ def _heat_and_preequil_system_bss(
         system=system,
         protocol=protocol,
         work_dir=work_dir,
-        process_name=process_name,
+        process_name=process_name,  # {work_dir}/{process_name}.xtc/gro defines the output files
         mdrun_options=mdrun_options,
     )
 
@@ -275,7 +294,6 @@ def _equilibrating_system_bss(
         Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
     process_name : Optional[str]
         Name of the process. If None, a default name "gromacs" will be used.
-        NOTE that {work_dir}/{process_name}.xtc/gro/edr/log defines the output files
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Production`
 
@@ -315,7 +333,7 @@ def _equilibrating_system_bss(
         protocol=protocol,
         work_dir=work_dir,
         mdrun_options=mdrun_options,
-        process_name=process_name,
+        process_name=process_name,  # {work_dir}/{process_name}.xtc/gro defines the output files
     )
 
     return equilibrated_system
@@ -323,9 +341,8 @@ def _equilibrating_system_bss(
 
 def run_ensemble_equilibration(
     source: Union[str, BSS._SireWrappers._system.System],
-    replicas: Sequence[Union[EnsembleEquilibrationConfig, dict]],
-    output_file_path: Optional[str] = None,
-    work_dir: Optional[str] = None,
+    replicas: Sequence[Union[EnsembleEquilibrationReplicaConfig, dict]],
+    output_basename: Optional[str] = None,
     mdrun_options: Optional[str] = None,
     process_name: str = "ensemble_equilibration",
     **extra_protocol_kwargs,
@@ -344,8 +361,14 @@ def run_ensemble_equilibration(
         A list of equilibration steps. Each step is a dict of parameters:
             (runtime, temperature_start, temperature_end, restraint, pressure)
         Use None for pressure_atm to perform NVT.
-    output_file_path : Optional[str]
-        If provided, writes the final System to this path (e.g. "out/preequil.gro").
+    output_basename : Optional[str]
+       If provided, this base name is used for both GROMACS outputs. Any extension
+        the user includes will be ignored, and two files will be written:
+        Usage:
+        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
+            in the directory "a/b/c".
+        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
+            current directory.
     work_dir : Optional[str]
         Directory to run GROMACS in. If None, a temp directory is created.
     mdrun_options : Optional[str]
@@ -353,53 +376,64 @@ def run_ensemble_equilibration(
     process_name : Optional[str]
         Name of the process. If None, a default name "gromacs" will be used.
     **extra_protocol_kwargs
-        Any additional named arguments to pass into `BSS.Protocol.Equilibration`
+        Any additional named arguments to pass into `BSS.Protocol.Production`
     """
-    if isinstance(source, str):
-        base_system = BSS.IO.readMolecules(source)
+    # decide on work_dir only if the user asked to save locally
+    if output_basename:
+        dir_name = os.path.dirname(output_basename) or os.getcwd()
+        base_work_dir = dir_name
     else:
-        base_system = source
+        base_work_dir = None
+
+    # base_system = read_system_from_local(source)
 
     # normalize every step into an EquilStep
-    configs: list[EnsembleEquilibrationConfig] = []
+    configs: list[EnsembleEquilibrationReplicaConfig] = []
     for s in replicas:
-        if isinstance(s, EnsembleEquilibrationConfig):
+        if isinstance(s, EnsembleEquilibrationReplicaConfig):
             configs.append(s)
         elif isinstance(s, dict):
-            configs.append(EnsembleEquilibrationConfig.model_validate(s))
+            configs.append(EnsembleEquilibrationReplicaConfig.model_validate(s))
         else:
             raise TypeError(f"Each step must be EquilStep or dict, got {type(s)}.")
 
     # run each replicate
     systems = []
     for ndx, _repeat in enumerate(configs, start=1):
-        logger.info(f"Launching replicate equilibration run {ndx}/{len(configs)}...")
+        logger.info(
+            f"Launching enssemble equilibration (via BSS.Protocol.Production)"
+            f"run {ndx}/{len(configs)}..."
+        )
 
-        if work_dir:
-            rep_dir = os.path.join(work_dir, f"ensemble_equilibration_{ndx}")
-            os.makedirs(rep_dir, exist_ok=True)
+        # Must load a fresh system for each replica because BSS system is mutable in place
+        system_copy = load_fresh_system(source)
+
+        if base_work_dir:
+            work_dir = os.path.join(base_work_dir, f"ensemble_equilibration_{ndx}")
+            os.makedirs(work_dir, exist_ok=True)
         else:
-            rep_dir = tempfile.mkdtemp(prefix=f"{process_name}_{ndx}_")
+            work_dir = None
 
         pname = f"{process_name}_{ndx}"
-        equilibrated_system_out = _equilibrating_system_bss(
-            system=base_system,
-            runtime_ps=_repeat.runtime,
+        equilibrated_system = _equilibrating_system_bss(
+            system=system_copy,
+            runtime_ns=_repeat.runtime,
             temperature_k=_repeat.temperature,
             pressure_atm=_repeat.pressure,
             restraint=_repeat.restraint,
             timestep_fs=_repeat.timestep,
-            work_dir=rep_dir,
+            work_dir=work_dir,
             mdrun_options=mdrun_options,
             process_name=pname,
             **extra_protocol_kwargs,
         )
-        systems.append(equilibrated_system_out)
+        systems.append(equilibrated_system)
 
-        out_gro = os.path.join(rep_dir, f"{pname}.gro")
-        logger.info(f"Saving replicate {ndx} system to {out_gro}")
-        BSS.IO.saveMolecules(
-            str(out_gro), equilibrated_system_out, fileformat=["gro87", "grotop"]
+        # Save the system to local files if output_basename is provided
+        save_system_to_local(
+            system=equilibrated_system,
+            output_basename=work_dir,
+            system_nametag_logging=f"equilibrated system {ndx}",
         )
 
     return systems

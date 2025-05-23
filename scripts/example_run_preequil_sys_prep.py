@@ -3,11 +3,11 @@ import os
 
 from binding_affinity_predicting.components.utils import save_workflow_config
 from binding_affinity_predicting.data.schemas import (
+    BaseWorkflowConfig,
+    EmpiricalPreEquilibrationConfig,
     EnergyMinimisationConfig,
-    PreEquilibrationConfig,
     PreEquilStageConfig,
     SimulationRestraint,
-    WorkflowConfig,
 )
 from binding_affinity_predicting.workflows.free_energy_calc.system_prep_workflow import (
     prepare_preequil_molecular_system,
@@ -33,11 +33,11 @@ custom_steps = [
     ),
 ]
 
-custom_preequil = PreEquilibrationConfig(steps=custom_steps)
+custom_preequil = EmpiricalPreEquilibrationConfig(steps=custom_steps)
 
 custom_min = EnergyMinimisationConfig(steps=500)
 
-cfg = WorkflowConfig(
+cfg = BaseWorkflowConfig(
     slurm=False,  # run everything locally
     param_preequilibration=custom_preequil,
     param_energy_minimisation=custom_min,
@@ -45,14 +45,15 @@ cfg = WorkflowConfig(
     mdrun_options="-ntmpi 1 -ntomp 1",
 )
 
-output_dir = "/Users/jingjinghuang/Documents/fep_workflow/debug/inputs/in_files"
+input_dir = "/Users/jingjinghuang/Documents/fep_workflow/debug/inputs/in_files"
+output_dir = "/Users/jingjinghuang/Documents/fep_workflow/debug/inputs/tmp_output"
 os.makedirs(output_dir, exist_ok=True)
 
 system = prepare_preequil_molecular_system(
     config=cfg,
     output_nametag="bound",
-    protein_path=os.path.join(output_dir, "protein.pdb"),
-    ligand_path=os.path.join(output_dir, "ligand.sdf"),
+    protein_path=os.path.join(input_dir, "protein.pdb"),
+    ligand_path=os.path.join(input_dir, "ligand.sdf"),
     output_dir=output_dir,
     use_slurm=cfg.slurm,
 )

@@ -4,7 +4,7 @@ from typing import Optional
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
-from binding_affinity_predicting.data.schemas import WorkflowConfig
+from binding_affinity_predicting.data.schemas import BaseWorkflowConfig
 from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
 from binding_affinity_predicting.simulation.parameterise import parameterise_system
 from binding_affinity_predicting.simulation.preequilibration import (
@@ -20,7 +20,7 @@ logger.setLevel(logging.INFO)
 def prepare_preequil_molecular_system(
     *,
     output_nametag: str,
-    config: WorkflowConfig = WorkflowConfig(),
+    config: BaseWorkflowConfig = BaseWorkflowConfig(),
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
     water_path: Optional[str] = None,
@@ -40,8 +40,8 @@ def prepare_preequil_molecular_system(
     config : WorkflowConfig
         Configuration object containing the parameters for the workflow.
     output_nametag : str
-        The name of the output file (without extension).
-        e.g. "complex" will create "complex.gro".
+        NOTE: The name of the output file (without extension).
+        e.g. "complex" will create "complex.gro" (structure) and "complex.top" (topology).
     protein_path : str, optional
         Path to the protein structure file (PDB/GRO/etc).
     ligand_path : str, optional
@@ -66,7 +66,7 @@ def prepare_preequil_molecular_system(
         ligand_ff=config.param_system_prep.forcefields["ligand"],
         water_ff=config.param_system_prep.forcefields["water"],
         water_model=config.param_system_prep.water_model,
-        output_file_path=os.path.join(output_dir, f"{output_nametag}.gro"),
+        output_basename=os.path.join(output_dir, f"{output_nametag}.gro"),
     )
 
     # ── 2) SOLVATE ──────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ def prepare_preequil_molecular_system(
         source=system_parameterised,
         water_model=config.param_system_prep.water_model,
         ion_conc=config.param_system_prep.ion_conc,
-        output_file_path=os.path.join(output_dir, f"{output_nametag}_solvated.gro"),
+        output_basename=os.path.join(output_dir, f"{output_nametag}_solvated.gro"),
     )
 
     # ── 3) ENERGY MINIMISE ─────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ def prepare_preequil_molecular_system(
     energy_min_out = os.path.join(output_dir, f"{output_nametag}_energy_min.gro")
     min_kwargs = dict(
         source=system_solvated,
-        output_file_path=energy_min_out,
+        output_basename=energy_min_out,
         min_steps=config.param_energy_minimisation.steps,
         mdrun_options=config.mdrun_options,
         process_name="minimise_system",
@@ -107,9 +107,8 @@ def prepare_preequil_molecular_system(
     preequil_kwargs = dict(
         source=system_energy_min,
         steps=config.param_preequilibration.steps,
-        work_dir=output_dir,
         mdrun_options=config.mdrun_options,
-        output_file_path=preequil_out,
+        output_basename=preequil_out,
         process_name="preequil_system",
     )
 
