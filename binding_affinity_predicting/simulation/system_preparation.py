@@ -1,10 +1,13 @@
 import logging
-import os
 from typing import Callable, Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
-from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule  # type: ignore[import]
-from sire.legacy import Mol as SireMol  # type: ignore[import]
+
+from binding_affinity_predicting.simulation.utils import (
+    decouple_ligand_in_system,
+    load_system_from_source,
+    save_system_to_local,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -13,7 +16,7 @@ logger.setLevel(logging.INFO)
 def solvate_system(
     source: Union[str, BSS._SireWrappers._system.System],
     water_model: str = "tip3p",
-    output_file_path: Optional[str] = None,
+    output_basename: Optional[str] = None,
     **solvate_kwargs,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -28,8 +31,14 @@ def solvate_system(
         Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System
     water_model : str
         Water model to use for solvation (e.g. "tip3p")
-    output_file_path : str
-        file to the output directory where the solvated system will be saved.
+    output_basename : Optional[str]
+       If provided, this base name is used for both GROMACS outputs. Any extension
+        the user includes will be ignored, and two files will be written:
+        Usage:
+        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
+            in the directory "a/b/c".
+        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
+            current directory.
     **solvate_kwargs : dict
         Additional keyword arguments to pass to the solvation function.
 
@@ -38,21 +47,17 @@ def solvate_system(
     solvated_system : BSS._SireWrappers._system.System
         Solvated system.
     """
-    if isinstance(source, str):
-        base_system = BSS.IO.readMolecules(str(source))  # type: ignore
-    else:
-        base_system = source
+    base_system = load_system_from_source(source)
 
     solvated_system = _solvate_molecular_system_bss(
         system=base_system, water_model=water_model, **solvate_kwargs
     )
 
-    if output_file_path:
-        logger.info(f"Writing solvated system to {output_file_path}")
-        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-        BSS.IO.saveMolecules(
-            str(output_file_path), solvated_system, fileformat=["gro87", "grotop"]
-        )
+    save_system_to_local(
+        system=solvated_system,
+        output_basename=output_basename,
+        system_nametag_logging="sovlated system",
+    )
 
     return solvated_system
 
@@ -146,3 +151,72 @@ def _solvate_molecular_system_bss(
     )
 
     return solvated_system
+
+
+def extract_restraint_from_traj(
+    work_dir: str,
+    trajectory_file: str,
+    topology_file: str,
+    system: BSS._SireWrappers._system.System,
+    output_filename: Optional[str] = None,
+    temperature: float = 298.15,
+    append_to_ligand_selection: str = "",
+) -> BSS.FreeEnergy._restraint.Restraint:  # type: ignore
+    """
+    For a BOUND leg, loop over trajectories in each outdir,
+    run BSS.FreeEnergy.RestraintSearch.analyse(), save to txt,
+    and accumulate into restraint_list. Return the final system.
+
+    Parameters
+    ----------
+    work_dir : str
+        The simulation directory containing the trajectory files.
+    trajectory_file : str
+        The trajectory file to analyze.
+    topology_file : str
+        The topology file to analyze.
+    system : BSS._SireWrappers._system.System
+        The system to analyze.
+    output_filename : Optional[str]
+        The output filename for the restraint file.
+    temperature : float
+        The temperature of the system in Kelvin.
+    append_to_ligand_selection : str
+        Appends the supplied string to the default atom selection which chooses
+        the atoms in the ligand to consider as potential anchor points. The default
+        atom selection is f'resname {ligand_resname} and not name H*'. Uses the
+        mdanalysis atom selection language. For example, 'not name O*' will result
+        in an atom selection of f'resname {ligand_resname} and not name H* and not
+        name O*'.
+
+    Returns
+    -------
+    """
+    # convert to BSS units
+    temperature = temperature * BSS.Units.Temperature.kelvin
+
+    # Mark the ligand to be decoupled so the restraints searching algorithm works
+    system = decouple_ligand_in_system(system=system)
+
+    traj = BSS.Trajectory.Trajectory(
+        topology=topology_file,
+        trajectory=trajectory_file,
+        system=system,
+    )
+
+    restraint = BSS.FreeEnergy.RestraintSearch.analyse(
+        method="BSS",
+        system=system,  # must contain a single decoupled molecule
+        traj=traj,
+        work_dir=work_dir,
+        temperature=temperature,
+        append_to_ligand_selection=append_to_ligand_selection,
+    )
+    if restraint is None:
+        raise ValueError(f"No restraint found in {work_dir} for {trajectory_file}")
+
+    if output_filename:
+        with open(f"{work_dir}/{output_filename}", "w") as f:
+            f.write(restraint.toString(engine="GROMACS"))
+
+    return restraint
