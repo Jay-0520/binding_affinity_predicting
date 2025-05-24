@@ -167,7 +167,7 @@ def decouple_ligand_in_system(
             f"and no molecule in {min_atoms}–{max_atoms} atoms."
         )
 
-    # Decouple & replace
+    # try decoupling, but skip if already decoupled
     try:
         lig = BSS.Align.decouple(system[ligand_idx], intramol=True)
     except Exception as e:

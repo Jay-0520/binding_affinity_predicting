@@ -403,9 +403,9 @@ def run_ensemble_equilibration(
     for ndx, _repeat in enumerate(configs, start=1):
         logger.info(
             f"Launching ensemble equilibration (via BSS.Protocol.Production)"
-            f" run {ndx}/{len(configs)}...at runtime={_repeat.runtime} ns"
-            f" timestep={_repeat.timestep} fs, temperature={_repeat.temperature} K"
-            f" restraint={_repeat.restraint}, pressure={_repeat.pressure} atm"
+            f" run {ndx}/{len(configs)}...at runtime={_repeat.runtime}ns"
+            f" timestep={_repeat.timestep}fs, temperature={_repeat.temperature}K"
+            f" restraint={_repeat.restraint}, pressure={_repeat.pressure}atm"
         )
 
         # Must load a fresh system for each replica because BSS system is mutable in place

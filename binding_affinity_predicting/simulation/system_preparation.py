@@ -175,6 +175,7 @@ def extract_restraint_from_traj(
         The trajectory file to analyze.
     topology_file : str
         The topology file to analyze.
+        NOTE is forced to be GROMACS TPR file to be compatible with BSS
     system : BSS._SireWrappers._system.System
         The system to analyze.
     output_filename : Optional[str]
@@ -203,7 +204,6 @@ def extract_restraint_from_traj(
         trajectory=trajectory_file,
         system=system,
     )
-
     restraint = BSS.FreeEnergy.RestraintSearch.analyse(
         method="BSS",
         system=system,  # must contain a single decoupled molecule

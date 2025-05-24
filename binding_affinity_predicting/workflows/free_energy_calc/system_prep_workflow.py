@@ -145,6 +145,8 @@ def prepare_ensemble_equilibration_replicas(
     """
     Run ensemble equilibration for the given system and
     extract restraints from trajectory for each replica.
+
+    Trajectory is loaded using MDAnalysis
     """
     # 1. Run the actual BSS equilibration
     replicas = config.param_ensemble_equilibration.replicas
@@ -155,7 +157,7 @@ def prepare_ensemble_equilibration_replicas(
         replicas=replicas,
         output_basename=output_basename,
         mdrun_options=config.mdrun_options,
-        process_name="run_ensemble_equilibration",
+        process_name="ensemble_equilibration",
         **extra_protocol_kwargs,
     )
 
@@ -174,8 +176,9 @@ def prepare_ensemble_equilibration_replicas(
             )
         trajectory_file = trajs[0]
 
-        # grab the exactly one .top
-        tops = glob.glob(os.path.join(rep_dir, "*.top"))
+        # grab the exactly one .tpr file.
+        # NOTE tpr is forced to be the top file in BSS for restraint extraction
+        tops = glob.glob(os.path.join(rep_dir, "*.tpr"))
         if len(tops) != 1:
             raise RuntimeError(
                 f"Expected 1 topology in {rep_dir}, but found {len(tops)}."
