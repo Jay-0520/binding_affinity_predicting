@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 import time
+from pathlib import Path
 from typing import Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
@@ -191,39 +192,53 @@ def decouple_ligand_in_system(
 
 def save_system_to_local(
     system: BSS._SireWrappers._system.System,
-    output_basename: Optional[str] = None,
+    filename_stem: Optional[str] = None,
+    output_dir: Optional[str] = None,
     fileformat: list[str] = ["gro87", "grotop"],
-    system_nametag_logging: str = "ligand",
     **save_kwargs,
 ) -> None:
     """
-    If output_basename is set, writes out `<basename>.gro` and `<basename>.top`
-    and logs "Writing {logger_info} system to".
+    If output_dir is provided, write out `<output_dir>/<filename_stem>.<ext>` for
+    each fmt in fileformat, e.g. ["gro87","grotop"] -> .gro and .top, and log accordingly.
 
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        Usage:
-        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
-            in the directory "a/b/c".
-        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
-            current directory.
+    Parameters
+    ----------
+    system : BioSimSpace._SireWrappers._system.System
+        The system to save.
+    filename_stem : Optional[str]
+        The stem of the filename to use for the output files. Must be set if output_dir is set.
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
+    fileformat : list[str]
+        List of file formats to save the system in.
 
     Any additional keyword arguments (e.g. `property_map`) will be passed
     directly through to `BSS.IO.saveMolecules`.
     """
-    if not output_basename:
+    if not output_dir:
         return
 
-    # ensure directory exists (or fallback to cwd)
-    dir_name = os.path.dirname(output_basename) or os.getcwd()
-    os.makedirs(dir_name, exist_ok=True)
+    # enforce that filename_stem comes with output_dir
+    if output_dir is not None and not filename_stem:
+        raise ValueError("`filename_stem` must be provided when `output_dir` is set.")
 
-    logger.info(f"Writing {system_nametag_logging} to {dir_name}")
-    # write out two gromacs files, gro and top files
-    BSS.IO.saveMolecules(
-        str(output_basename), system, fileformat=fileformat, **save_kwargs
-    )
+    # ensure directory exists
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # note that gro87 -> gro and grotop -> top files in GROMACS
+    files_str = ", ".join(f"{filename_stem}.{ext}" for ext in fileformat)
+    logger.info(f"Writing {files_str} to {out_dir}")
+
+    # Build the *basename* including the stem
+    prefix = out_dir / filename_stem
+
+    # BSS.IO.saveMolecules() takes in a basename, meaning that:
+    # 1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
+    #     in the directory "a/b/c".
+    # 2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
+    #     current directory.
+    BSS.IO.saveMolecules(str(prefix), system, fileformat=fileformat, **save_kwargs)
 
 
 def load_system_from_source(

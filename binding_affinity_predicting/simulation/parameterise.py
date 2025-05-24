@@ -22,7 +22,8 @@ def parameterise_system(
     ligand_ff: str = "openff_unconstrained-2.0.0",
     water_ff: str = "ff14SB",
     water_model: str = "tip3p",
-    output_basename: Optional[str] = None,
+    filename_stem: Optional[str] = None,
+    output_dir: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
     Parameterise and assemble a combined System of any subset of protein, ligand and water.
@@ -44,16 +45,10 @@ def parameterise_system(
         Force field for waters (default "ff14SB").
     water_model: str
         Water model identifier (default "tip3p").
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        - `<dirname>/<basename>.gro`
-        - `<dirname>/<basename>.top`
-        Usage:
-        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
-            in the directory "a/b/c".
-        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
-            current directory.
+    filename_stem : Optional[str]
+        The stem of the filename to use for the output files. Must be set if output_dir is set.
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
 
     Returns
     -------
@@ -94,11 +89,11 @@ def parameterise_system(
     for sys_part in components[1:]:
         full_system += sys_part  # only works for different molecules
 
-    # Save the system to local files if output_basename is provided
+    # Save the system to local files if output_dir and filename_stem are provided
     save_system_to_local(
         system=full_system,
-        output_basename=output_basename,
-        system_nametag_logging="parameterised system",
+        filename_stem=filename_stem,
+        output_dir=output_dir,
     )
 
     return full_system
@@ -108,7 +103,8 @@ def _parameterise_water(
     file_path: str,
     forcefield: str = "ff14SB",
     water_model: str = "tip3p",
-    output_basename: Optional[str] = None,
+    filename_stem: Optional[str] = None,
+    output_dir: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:
     """
     Parameterise all (crystal) water molecules in a given file using the specified
@@ -122,11 +118,10 @@ def _parameterise_water(
         Force field name to apply (e.g. "ff14SB").
     water_model : str
         Identifier for the water model (e.g. "tip3p", "spce").
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        - `<dirname>/<basename>.gro`
-        - `<dirname>/<basename>.top`
+    filename_stem : Optional[str]
+        The stem of the filename to use for the output files. Must be set if output_dir is set.
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
 
     Returns
     -------
@@ -158,11 +153,11 @@ def _parameterise_water(
     for mol in parameterised[1:]:
         system += mol  # only works for different molecules
 
-    # Save the system to local files if output_basename is provided
+    # Save the system to local files if output_dir and filename_stem are provided
     save_system_to_local(
         system=system,
-        output_basename=output_basename,
-        system_nametag_logging="water system",
+        filename_stem=filename_stem,
+        output_dir=output_dir,
     )
 
     return system
@@ -171,7 +166,8 @@ def _parameterise_water(
 def _parameterise_ligand(
     file_path: str,
     forcefield: str = "openff_unconstrained-2.0.0",
-    output_basename: Optional[str] = None,
+    filename_stem: Optional[str] = None,
+    output_dir: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:
     """
     Parameterise the ligand. In a classic FEP calculation, we should only have one ligand
@@ -182,11 +178,10 @@ def _parameterise_ligand(
         Path to the ligand coordinate file (e.g. ligand.sdf) containing the ligand molecule.
     forcefield : str
         Force field name to apply (e.g. "openff_unconstrained-2.0.0").
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        - `<dirname>/<basename>.gro`
-        - `<dirname>/<basename>.top`
+    filename_stem : Optional[str]
+        The stem of the filename to use for the output files. Must be set if output_dir is set.
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
 
     Returns
     -------
@@ -224,18 +219,21 @@ def _parameterise_ligand(
     for mol in parameterised[1:]:
         system += mol  # only works for different molecules
 
-    # Save the system to local files if output_basename is provided
+    # Save the system to local files if output_dir and filename_stem are provided
     save_system_to_local(
         system=system,
-        output_basename=output_basename,
-        system_nametag_logging="ligand system",
+        filename_stem=filename_stem,
+        output_dir=output_dir,
     )
 
     return system
 
 
 def _parameterise_protein(
-    file_path: str, forcefield: str = "ff14SB", output_basename: Optional[str] = None
+    file_path: str,
+    forcefield: str = "ff14SB",
+    filename_stem: Optional[str] = None,
+    output_dir: Optional[str] = None,
 ) -> BSS._SireWrappers._system.System:
     """
     Parameterise the protein. In a classic FEP calculation, we should only have one protein
@@ -246,11 +244,10 @@ def _parameterise_protein(
         Path to the protein coordinate file (e.g. "protein.pdb") containing the protein molecule.
     forcefield : str
         Force field name to apply (e.g. "ff14SB").
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        - `<dirname>/<basename>.gro`
-        - `<dirname>/<basename>.top`
+    filename_stem : Optional[str]
+        The stem of the filename to use for the output files. Must be set if output_dir is set.
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
 
     Returns
     -------
@@ -279,11 +276,11 @@ def _parameterise_protein(
     for mol in parameterised[1:]:
         system += mol  # only works for different molecules
 
-    # Save the system to local files if output_basename is provided
+    # Save the system to local files if output_dir and filename_stem are provided
     save_system_to_local(
         system=system,
-        output_basename=output_basename,
-        system_nametag_logging="protein system",
+        filename_stem=filename_stem,
+        output_dir=output_dir,
     )
 
     return system

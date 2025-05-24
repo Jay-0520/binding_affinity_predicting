@@ -24,7 +24,7 @@ logger.setLevel(logging.INFO)
 
 def prepare_preequil_molecular_system(
     *,
-    output_nametag: str,
+    filename_stem: str,
     config: BaseWorkflowConfig = BaseWorkflowConfig(),
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
@@ -44,9 +44,9 @@ def prepare_preequil_molecular_system(
     ----------
     config : WorkflowConfig
         Configuration object containing the parameters for the workflow.
-    output_nametag : str
+    filename_stem : str
         NOTE: The name of the output file (without extension).
-        e.g. "complex" will create "complex.gro" (structure) and "complex.top" (topology).
+        e.g. "bound" will create "bound.gro" (structure) and "bound.top" (topology).
     protein_path : str, optional
         Path to the protein structure file (PDB/GRO/etc).
     ligand_path : str, optional
@@ -71,7 +71,8 @@ def prepare_preequil_molecular_system(
         ligand_ff=config.param_system_prep.forcefields["ligand"],
         water_ff=config.param_system_prep.forcefields["water"],
         water_model=config.param_system_prep.water_model,
-        output_basename=os.path.join(output_dir, f"{output_nametag}.gro"),
+        filename_stem=filename_stem,
+        output_dir=output_dir,
     )
 
     # ── 2) SOLVATE ──────────────────────────────────────────────────────
@@ -80,18 +81,18 @@ def prepare_preequil_molecular_system(
         source=system_parameterised,
         water_model=config.param_system_prep.water_model,
         ion_conc=config.param_system_prep.ion_conc,
-        output_basename=os.path.join(output_dir, f"{output_nametag}_solvated.gro"),
+        filename_stem=f"{filename_stem}_solvated",
+        output_dir=output_dir,
     )
 
     # ── 3) ENERGY MINIMISE ─────────────────────────────────────────────────────
     logger.info("Step 3: Energy minimise the system...")
-    energy_min_out = os.path.join(output_dir, f"{output_nametag}_energy_min.gro")
     min_kwargs = dict(
         source=system_solvated,
-        output_basename=energy_min_out,
+        filename_stem=f"{filename_stem}_minimised",
+        output_dir=output_dir,
         min_steps=config.param_energy_minimisation.steps,
         mdrun_options=config.mdrun_options,
-        process_name="minimise_system",
     )
     if use_slurm:
         run_slurm(
@@ -101,20 +102,22 @@ def prepare_preequil_molecular_system(
             job_name="minimise_system",
             **min_kwargs,
         )
-        # once the SLURM job finishes, reload from file
-        system_energy_min = BSS.IO.readMolecules(energy_min_out)
+        # once the SLURM job finishes, reload from file; need to include file extension
+        system_energy_min = BSS.IO.readMolecules(
+            os.path.join(output_dir, f"{filename_stem}_minimised.gro")
+        )
     else:
         system_energy_min = energy_minimise_system(**min_kwargs)
 
     # ── 4) PRE-EQUILIBRATE ───────────────────────────────────────────────
     logger.info("Step 4: Pre-equilibrate the system...")
-    preequil_out = os.path.join(output_dir, f"{output_nametag}_preequiled.gro")
+    # preequil_out = os.path.join(output_dir, f"{output_nametag}_preequiled.gro")
     preequil_kwargs = dict(
         source=system_energy_min,
         steps=config.param_preequilibration.steps,
         mdrun_options=config.mdrun_options,
-        output_basename=preequil_out,
-        process_name="preequil_system",
+        filename_stem=f"{filename_stem}_preequiled",
+        output_dir=output_dir,
     )
 
     if use_slurm:
@@ -125,7 +128,9 @@ def prepare_preequil_molecular_system(
             job_name="preequil_system",
             **preequil_kwargs,
         )
-        system_preequil = BSS.IO.readMolecules(preequil_out)
+        system_preequil = BSS.IO.readMolecules(
+            os.path.join(output_dir, f"{filename_stem}_preequiled.gro")
+        )
     else:
         system_preequil = preequilibrate_system(**preequil_kwargs)
 
@@ -136,7 +141,8 @@ def prepare_preequil_molecular_system(
 def prepare_ensemble_equilibration_replicas(
     *,
     source: Union[str, BSS._SireWrappers._system.System],
-    output_basename: str,
+    filename_stem: str = "ensemble_equilibration",
+    output_dir: str,
     config: BaseWorkflowConfig = BaseWorkflowConfig(),
     **extra_protocol_kwargs,
 ) -> tuple[
@@ -146,8 +152,24 @@ def prepare_ensemble_equilibration_replicas(
     Run ensemble equilibration for the given system and
     extract restraints from trajectory for each replica.
 
-    Trajectory is loaded using MDAnalysis
+    Trajectory is loaded using MDAnalysis by default
+
+    Parameters
+    ----------
+    source : str or BSS._SireWrappers._system.System
+        The source system to equilibrate. If a string, it is treated as a path to the system file.
+    output_dir : str
+        Directory where the output files will be saved.
+    filename_stem : str
+        The stem of the filename to use for the output files.
+    config : BaseWorkflowConfig
+        Configuration object containing the parameters for the workflow.
+    extra_protocol_kwargs : dict
+        Additional keyword arguments to pass to the equilibration function.
     """
+    # ensure the base output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
     # 1. Run the actual BSS equilibration
     replicas = config.param_ensemble_equilibration.replicas
     logger.info(f"Running ensemble equilibration with {len(replicas)} replicas...")
@@ -155,7 +177,8 @@ def prepare_ensemble_equilibration_replicas(
     system_list = run_ensemble_equilibration(
         source=source,
         replicas=replicas,
-        output_basename=output_basename,
+        filename_stem=filename_stem,
+        output_dir=output_dir,
         mdrun_options=config.mdrun_options,
         process_name="ensemble_equilibration",
         **extra_protocol_kwargs,
@@ -163,10 +186,9 @@ def prepare_ensemble_equilibration_replicas(
 
     # 2. Now loop over each replicate and extract its restraint
     logger.info("Extracting restraints from each replica...")
-    dir_name = os.path.dirname(output_basename) or os.getcwd()
     restraint_list = []
     for idx in range(1, len(system_list) + 1):
-        rep_dir = os.path.join(dir_name, f"ensemble_equilibration_{idx}")
+        rep_dir = os.path.join(output_dir, f"ensemble_equilibration_{idx}")
 
         # grab the exactly one .xtc
         trajs = glob.glob(os.path.join(rep_dir, "*.xtc"))
@@ -194,13 +216,49 @@ def prepare_ensemble_equilibration_replicas(
             trajectory_file=trajectory_file,
             topology_file=topology_file,
             system=system_list[idx - 1],
-            output_filename=f"restraint_{idx}.txt",
+            output_filename=f"restraint_{idx}.itp",  # GROMACS format for restraints
             temperature=temperature_equil,
             append_to_ligand_selection=config.append_to_ligand_selection,
         )
         restraint_list.append(restraint)
 
     return system_list, restraint_list
+
+
+def run_complete_system_preparation(
+    *,
+    output_nametag: str,
+    config: BaseWorkflowConfig = BaseWorkflowConfig(),
+    protein_path: Optional[str] = None,
+    ligand_path: Optional[str] = None,
+    water_path: Optional[str] = None,
+    output_dir: str,
+    use_slurm: bool = True,
+) -> BSS._SireWrappers._system.System:
+
+    prepare_preequil_molecular_system(
+        filename_stem=output_nametag,
+        config=config,
+        protein_path=protein_path,
+        ligand_path=ligand_path,
+        water_path=water_path,
+        output_dir=output_dir,
+        use_slurm=use_slurm,
+    )
+    prepare_ensemble_equilibration_replicas(
+        source=output_nametag,
+        output_basename=os.path.join(output_dir, f"{output_nametag}_ensemble"),
+        config=config,
+        filename_stem=output_nametag,
+        output_dir=output_dir,
+    )
+
+
+def move_and_create_files():
+    """
+    Move files to the correct location and create any necessary files.
+    """
+    pass
 
 
 def prepare_fep_simulation_systems():

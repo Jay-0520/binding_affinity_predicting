@@ -23,10 +23,10 @@ logger.setLevel(logging.INFO)
 
 def energy_minimise_system(
     source: Union[str, BSS._SireWrappers._system.System],
-    output_basename: Optional[str] = None,
+    filename_stem: str = "minimised",
+    output_dir: Optional[str] = None,
     min_steps: int = 1_000,
     mdrun_options: Optional[str] = None,
-    process_name: Optional[str] = None,
     **extra_protocol_kwargs,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -36,20 +36,17 @@ def energy_minimise_system(
     ----------
     source : str or System
         Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        Usage:
-        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
-            in the directory "a/b/c".
-        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
-            current directory.
+    filename_stem : str, default "preequilibration"
+        The stem of the filename to use for the output files.
+        If None, a default name "gromacs" will be used in the output directory, which is
+         handled by run_process()
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
+        NOTE that {output_dir}/{filename_stem}.xtc/gro/edr/log defines the output files
     min_steps : int
         Number of minimisation steps to perform.
     mdrun_options : str, optional
         Additional options to pass to the GROMACS mdrun command.
-    process_name : Optional[str]
-        Name of the process. If None, a default name "gromacs" will be used.
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Minimisation`
 
@@ -58,13 +55,7 @@ def energy_minimise_system(
     minimised_system : BSS._SireWrappers._system.System
         Minimised system.
     """
-    # decide on work_dir only if the user asked to save locally
-    if output_basename:
-        dir_name = os.path.dirname(output_basename) or os.getcwd()
-        work_dir = dir_name
-    else:
-        work_dir = None
-
+    # load the system from the source
     solvated_system = load_system_from_source(source)
 
     # Check that it is actually solvated in a box of water
@@ -77,19 +68,21 @@ def energy_minimise_system(
     minimised_system = run_process(
         system=solvated_system,
         protocol=protocol,
-        work_dir=work_dir,
+        work_dir=output_dir,
         mdrun_options=mdrun_options,
-        process_name=process_name,  # {work_dir}/{process_name}.xtc/gro defines the output files
+        process_name=filename_stem,
     )
 
-    # Save the system to local files if output_basename is provided
+    # Save the system to local files if output_dir and filename_stem are provided
     # renaming the velocity property to foo so avoid saving velocities. Saving the
     # velocities sometimes causes issues with the size of the floats overflowing the RST7
     # format.
+    # TODO: when run_process in GROMACS, it automatically save system to a GRO file so may
+    # not need this. However, other engines might need this
     save_system_to_local(
         system=minimised_system,
-        output_basename=output_basename,
-        system_nametag_logging="minimised system",
+        filename_stem=filename_stem,
+        output_dir=output_dir,
         property_map={"velocity": "foo"},
     )
 
@@ -99,9 +92,9 @@ def energy_minimise_system(
 def preequilibrate_system(
     source: Union[str, BSS._SireWrappers._system.System],
     steps: Sequence[Union[PreEquilStageConfig, dict]],
-    output_basename: Optional[str] = None,
+    filename_stem: str = "preequilibration",
+    output_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
-    process_name: str = "preequilibration",
     **extra_protocol_kwargs,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -117,18 +110,15 @@ def preequilibrate_system(
             (runtime, temperature_start, temperature_end, restraint, pressure)
         see the EquilStep class for details.
         Use None for pressure_atm to perform NVT.
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        Usage:
-        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
-            in the directory "a/b/c".
-        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
-            current directory.
+    filename_stem : str, default "preequilibration"
+        The stem of the filename to use for the output files.
+        If None, a default name "gromacs" will be used in the output directory, which is
+         handled by run_process()
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
+        NOTE that {output_dir}/{filename_stem}.xtc/gro/edr/log defines the output files
     mdrun_options : Optional[str]
         Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
-    process_name : Optional[str]
-        Name of the process. If None, a default name "gromacs" will be used.
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Equilibration`
 
@@ -137,13 +127,7 @@ def preequilibrate_system(
     System
         The equilibrated BioSimSpace System.
     """
-    # decide on work_dir only if the user asked to save locally
-    if output_basename:
-        dir_name = os.path.dirname(output_basename) or os.getcwd()
-        work_dir = dir_name
-    else:
-        work_dir = None
-
+    # load the system from the source
     system = load_system_from_source(source)
 
     # Check that it is solvated and has a box
@@ -161,7 +145,7 @@ def preequilibrate_system(
 
     # iterate equilibration steps
     preeq_system = system
-    for _step_param in normalized:
+    for ndx, _step_param in enumerate(normalized):
         runtime = _step_param.runtime
         temperature_start = _step_param.temperature_start
         temperature_end = _step_param.temperature_end
@@ -179,20 +163,118 @@ def preequilibrate_system(
             temperature_end_k=temperature_end,
             restraint=restraint,
             pressure_atm=pressure,
-            work_dir=work_dir,
+            output_dir=output_dir,
             mdrun_options=mdrun_options,
-            process_name=process_name,
+            filename_stem=f"{filename_stem}_{ndx+1}",  # add index to filename
             **extra_protocol_kwargs,
         )
 
-    # Save the system to local files if output_basename is provided
+    # TODO: when run_process in GROMACS, it automatically save system to a GRO file so may
+    # not need this. However, other engines might need this
     save_system_to_local(
         system=preeq_system,
-        output_basename=output_basename,
-        system_nametag_logging="pre-equilibrated system",
+        filename_stem=f"{filename_stem}_final",
+        output_dir=output_dir,
     )
 
     return preeq_system
+
+
+def run_ensemble_equilibration(
+    source: Union[str, BSS._SireWrappers._system.System],
+    replicas: Sequence[Union[EnsembleEquilibrationReplicaConfig, dict]],
+    filename_stem: str = "ensemble_equilibration",
+    output_dir: Optional[str] = None,
+    mdrun_options: Optional[str] = None,
+    **extra_protocol_kwargs,
+) -> list[BSS._SireWrappers._system.System]:
+    """
+    Run an ensemble of equilibration simulations by using BSS.Protocol.Production.
+
+    Note that in A3FE protocol, this step is only needed for BOUND leg
+    see ref: https://pubs.acs.org/doi/10.1021/acs.jctc.4c00806
+
+    Parameters
+    ----------
+    source : str or System
+        Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System.
+    steps : Sequence[EnsembleEquilibrationConfig]
+        A list of equilibration steps. Each step is a dict of parameters:
+            (runtime, temperature_start, temperature_end, restraint, pressure)
+        Use None for pressure_atm to perform NVT.
+    TODO: to be compatible with
+    filename_stem : str, default "preequilibration"
+        The stem of the filename to use for the output files.
+        If None, a default name "gromacs" will be used in the output directory, which is
+         handled by run_process()
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
+    mdrun_options : Optional[str]
+        Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
+    **extra_protocol_kwargs
+        Any additional named arguments to pass into `BSS.Protocol.Production`
+    """
+    # decide on work_dir only if the user asked to save locally
+    # if output_basename:
+    #     dir_name = os.path.dirname(output_basename) or os.getcwd()
+    #     base_work_dir = dir_name
+    # else:
+    #     base_work_dir = None
+
+    # base_system = read_system_from_local(source)
+
+    # normalize every step into an EquilStep
+    configs: list[EnsembleEquilibrationReplicaConfig] = []
+    for s in replicas:
+        if isinstance(s, EnsembleEquilibrationReplicaConfig):
+            configs.append(s)
+        elif isinstance(s, dict):
+            configs.append(EnsembleEquilibrationReplicaConfig.model_validate(s))
+        else:
+            raise TypeError(f"Each step must be EquilStep or dict, got {type(s)}.")
+
+    # run each replicate
+    systems = []
+    for ndx, _repeat in enumerate(configs, start=1):
+        logger.info(
+            f"Launching ensemble equilibration (via BSS.Protocol.Production)"
+            f" run {ndx}/{len(configs)}...at runtime={_repeat.runtime}ns"
+            f" timestep={_repeat.timestep}fs, temperature={_repeat.temperature}K"
+            f" restraint={_repeat.restraint}, pressure={_repeat.pressure}atm"
+        )
+
+        # Must load a fresh system for each replica because BSS system is mutable in place
+        system_copy = load_fresh_system(source)
+
+        if output_dir:
+            # hard-coded the folder name here
+            work_dir = os.path.join(output_dir, f"ensemble_equilibration_{ndx}")
+            os.makedirs(work_dir, exist_ok=True)
+
+        filename_stem_updated = f"{filename_stem}_{ndx}"
+        equilibrated_system = _equilibrating_system_bss(
+            system=system_copy,
+            runtime_ns=_repeat.runtime,
+            temperature_k=_repeat.temperature,
+            pressure_atm=_repeat.pressure,
+            restraint=_repeat.restraint,
+            timestep_fs=_repeat.timestep,
+            output_dir=output_dir,
+            filename_stem=filename_stem_updated,
+            mdrun_options=mdrun_options,
+            **extra_protocol_kwargs,
+        )
+        systems.append(equilibrated_system)
+
+        # TODO: when run_process in GROMACS, it automatically save system to a GRO file so may
+        # not need this. However, other engines might need this
+        save_system_to_local(
+            system=equilibrated_system,
+            filename_stem=filename_stem,
+            output_dir=output_dir,
+        )
+
+    return systems
 
 
 def _heat_and_preequil_system_bss(
@@ -202,9 +284,9 @@ def _heat_and_preequil_system_bss(
     temperature_end_k: float,
     restraint: Optional[str] = None,
     pressure_atm: Optional[float] = None,
-    work_dir: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    filename_stem: Optional[str] = None,
     mdrun_options: Optional[str] = None,
-    process_name: Optional[str] = None,
     **extra_protocol_kwargs,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -224,13 +306,14 @@ def _heat_and_preequil_system_bss(
         Restraint type (e.g. "backbone", "heavy").
     pressure_atm : Optional[float]
         Pressure in atm. If None, NVT is performed.
-    work_dir : Optional[str]
-        Directory to run GROMACS in. If None, a temp directory is created.
+    filename_stem : str, default "preequilibration"
+        The stem of the filename to use for the output files.
+        If None, a default name "gromacs" will be used in the output directory, which is
+         handled by run_process()
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
     mdrun_options : Optional[str]
         Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
-    process_name : Optional[str]
-        Name of the process. If None, a default name "gromacs" will be used.
-        NOTE that {work_dir}/{process_name}.xtc/gro/edr/log defines the output files
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Equilibration`
     """
@@ -254,8 +337,8 @@ def _heat_and_preequil_system_bss(
     heated_system = run_process(
         system=system,
         protocol=protocol,
-        work_dir=work_dir,
-        process_name=process_name,  # {work_dir}/{process_name}.xtc/gro defines the output files
+        work_dir=output_dir,
+        process_name=filename_stem,
         mdrun_options=mdrun_options,
     )
 
@@ -268,9 +351,9 @@ def _equilibrating_system_bss(
     temperature_k: float = 300.0,
     pressure_atm: float = 1.0,
     timestep_fs: float = 2,
-    work_dir: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    filename_stem: Optional[str] = None,
     mdrun_options: Optional[str] = None,
-    process_name: Optional[str] = None,
     **extra_protocol_kwargs,
 ) -> BSS._SireWrappers._system.System:
     """
@@ -290,10 +373,14 @@ def _equilibrating_system_bss(
         Timestep in femtoseconds. If None, the default timestep is used.
     work_dir : Optional[str]
         Directory to run GROMACS in. If None, a temp directory is created.
+    filename_stem : str, default "preequilibration"
+        The stem of the filename to use for the output files.
+        If None, a default name "gromacs" will be used in the output directory, which is
+         handled by run_process()
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
     mdrun_options : Optional[str]
         Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
-    process_name : Optional[str]
-        Name of the process. If None, a default name "gromacs" will be used.
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Production`
 
@@ -331,113 +418,9 @@ def _equilibrating_system_bss(
     equilibrated_system = run_process(
         system=system,
         protocol=protocol,
-        work_dir=work_dir,
+        work_dir=output_dir,
         mdrun_options=mdrun_options,
-        process_name=process_name,  # {work_dir}/{process_name}.xtc/gro defines the output files
+        process_name=filename_stem,
     )
 
     return equilibrated_system
-
-
-def run_ensemble_equilibration(
-    source: Union[str, BSS._SireWrappers._system.System],
-    replicas: Sequence[Union[EnsembleEquilibrationReplicaConfig, dict]],
-    output_basename: Optional[str] = None,
-    mdrun_options: Optional[str] = None,
-    process_name: str = "ensemble_equilibration",
-    **extra_protocol_kwargs,
-) -> list[BSS._SireWrappers._system.System]:
-    """
-    Run an ensemble of equilibration simulations by using BSS.Protocol.Production.
-
-    Note that in A3FE protocol, this step is only needed for BOUND leg
-    see ref: https://pubs.acs.org/doi/10.1021/acs.jctc.4c00806
-
-    Parameters
-    ----------
-    source : str or System
-        Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System.
-    steps : Sequence[EnsembleEquilibrationConfig]
-        A list of equilibration steps. Each step is a dict of parameters:
-            (runtime, temperature_start, temperature_end, restraint, pressure)
-        Use None for pressure_atm to perform NVT.
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        Usage:
-        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
-            in the directory "a/b/c".
-        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
-            current directory.
-        And GROMACS simulation files are stored in ensemble_equilibration_<ndx> directory
-    work_dir : Optional[str]
-        Directory to run GROMACS in. If None, a temp directory is created.
-    mdrun_options : Optional[str]
-        Extra mdrun flags as a single string (e.g. "-ntmpi 1 -ntomp 1").
-    process_name : Optional[str]
-        Name of the process. If None, a default name "gromacs" will be used.
-    **extra_protocol_kwargs
-        Any additional named arguments to pass into `BSS.Protocol.Production`
-    """
-    # decide on work_dir only if the user asked to save locally
-    if output_basename:
-        dir_name = os.path.dirname(output_basename) or os.getcwd()
-        base_work_dir = dir_name
-    else:
-        base_work_dir = None
-
-    # base_system = read_system_from_local(source)
-
-    # normalize every step into an EquilStep
-    configs: list[EnsembleEquilibrationReplicaConfig] = []
-    for s in replicas:
-        if isinstance(s, EnsembleEquilibrationReplicaConfig):
-            configs.append(s)
-        elif isinstance(s, dict):
-            configs.append(EnsembleEquilibrationReplicaConfig.model_validate(s))
-        else:
-            raise TypeError(f"Each step must be EquilStep or dict, got {type(s)}.")
-
-    # run each replicate
-    systems = []
-    for ndx, _repeat in enumerate(configs, start=1):
-        logger.info(
-            f"Launching ensemble equilibration (via BSS.Protocol.Production)"
-            f" run {ndx}/{len(configs)}...at runtime={_repeat.runtime}ns"
-            f" timestep={_repeat.timestep}fs, temperature={_repeat.temperature}K"
-            f" restraint={_repeat.restraint}, pressure={_repeat.pressure}atm"
-        )
-
-        # Must load a fresh system for each replica because BSS system is mutable in place
-        system_copy = load_fresh_system(source)
-
-        if base_work_dir:
-            # hard-coded the folder name here
-            work_dir = os.path.join(base_work_dir, f"ensemble_equilibration_{ndx}")
-            os.makedirs(work_dir, exist_ok=True)
-        else:
-            work_dir = None
-
-        pname = f"{process_name}_{ndx}"
-        equilibrated_system = _equilibrating_system_bss(
-            system=system_copy,
-            runtime_ns=_repeat.runtime,
-            temperature_k=_repeat.temperature,
-            pressure_atm=_repeat.pressure,
-            restraint=_repeat.restraint,
-            timestep_fs=_repeat.timestep,
-            work_dir=work_dir,
-            mdrun_options=mdrun_options,
-            process_name=pname,
-            **extra_protocol_kwargs,
-        )
-        systems.append(equilibrated_system)
-
-        # Save the system to local files if output_basename is provided
-        save_system_to_local(
-            system=equilibrated_system,
-            output_basename=work_dir,
-            system_nametag_logging=f"equilibrated system {ndx}",
-        )
-
-    return systems

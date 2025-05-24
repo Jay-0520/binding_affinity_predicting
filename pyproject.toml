@@ -21,7 +21,7 @@ dependencies = [
      "scipy",
      "ipython",
      "pymbar<4",
-     "pydantic",
+     "pydantic=2.11.5",
      "biosimspace",   # double check pkg name
 ]
 

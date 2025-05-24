@@ -16,7 +16,8 @@ logger.setLevel(logging.INFO)
 def solvate_system(
     source: Union[str, BSS._SireWrappers._system.System],
     water_model: str = "tip3p",
-    output_basename: Optional[str] = None,
+    filename_stem: Optional[str] = None,
+    output_dir: Optional[str] = None,
     **solvate_kwargs,
 ) -> BSS._SireWrappers._system.System:  # type: ignore
     """
@@ -31,14 +32,10 @@ def solvate_system(
         Path to the input file (PDB/GRO/etc) or an existing BioSimSpace System
     water_model : str
         Water model to use for solvation (e.g. "tip3p")
-    output_basename : Optional[str]
-       If provided, this base name is used for both GROMACS outputs. Any extension
-        the user includes will be ignored, and two files will be written:
-        Usage:
-        1. "a/b/c/tmp_name" or "a/b/c/tmp_name.gro" -> "tmp_name.gro" and "tmp_name.top"
-            in the directory "a/b/c".
-        2. "tmp_name.gro" or "tmp_name" -> "tmp_name.gro" and "tmp_name.top" in the
-            current directory.
+    filename_stem : Optional[str]
+        The stem of the filename to use for the output files. Must be set if output_dir is set.
+    output_dir : Optional[str]
+        Directory to write the output files to. If None, not written to disk.
     **solvate_kwargs : dict
         Additional keyword arguments to pass to the solvation function.
 
@@ -55,8 +52,8 @@ def solvate_system(
 
     save_system_to_local(
         system=solvated_system,
-        output_basename=output_basename,
-        system_nametag_logging="sovlated system",
+        filename_stem=filename_stem,
+        output_dir=output_dir,
     )
 
     return solvated_system
