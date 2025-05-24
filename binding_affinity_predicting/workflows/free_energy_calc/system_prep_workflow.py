@@ -180,7 +180,6 @@ def prepare_ensemble_equilibration_replicas(
         filename_stem=filename_stem,
         output_dir=output_dir,
         mdrun_options=config.mdrun_options,
-        process_name="ensemble_equilibration",
         **extra_protocol_kwargs,
     )
 
@@ -225,7 +224,7 @@ def prepare_ensemble_equilibration_replicas(
     return system_list, restraint_list
 
 
-def run_complete_system_preparation(
+def run_complete_system_setup(
     *,
     output_nametag: str,
     config: BaseWorkflowConfig = BaseWorkflowConfig(),

@@ -214,15 +214,6 @@ def run_ensemble_equilibration(
     **extra_protocol_kwargs
         Any additional named arguments to pass into `BSS.Protocol.Production`
     """
-    # decide on work_dir only if the user asked to save locally
-    # if output_basename:
-    #     dir_name = os.path.dirname(output_basename) or os.getcwd()
-    #     base_work_dir = dir_name
-    # else:
-    #     base_work_dir = None
-
-    # base_system = read_system_from_local(source)
-
     # normalize every step into an EquilStep
     configs: list[EnsembleEquilibrationReplicaConfig] = []
     for s in replicas:
@@ -259,7 +250,7 @@ def run_ensemble_equilibration(
             pressure_atm=_repeat.pressure,
             restraint=_repeat.restraint,
             timestep_fs=_repeat.timestep,
-            output_dir=output_dir,
+            output_dir=work_dir,
             filename_stem=filename_stem_updated,
             mdrun_options=mdrun_options,
             **extra_protocol_kwargs,
@@ -270,8 +261,9 @@ def run_ensemble_equilibration(
         # not need this. However, other engines might need this
         save_system_to_local(
             system=equilibrated_system,
-            filename_stem=filename_stem,
-            output_dir=output_dir,
+            # hard-appended "_{ndx}_final" to output filename
+            filename_stem=f"{filename_stem}_{ndx}_final",
+            output_dir=work_dir,
         )
 
     return systems
