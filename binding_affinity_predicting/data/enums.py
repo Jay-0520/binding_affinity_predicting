@@ -1,6 +1,6 @@
 """Enums required for Classes in the run package."""
 
-from enum import Enum as _Enum
+from enum import Enum
 from typing import List as _List
 
 __all__ = [
@@ -11,7 +11,7 @@ __all__ = [
 ]
 
 
-class JobStatus(_Enum):
+class JobStatus(int, Enum):
     """An enumeration of the possible job statuses"""
 
     NONE = 0
@@ -21,7 +21,13 @@ class JobStatus(_Enum):
     KILLED = 4
 
 
-class StageType(_Enum):
+class SimulationRestraint(str, Enum):
+    ALL = "all"
+    BACKBONE = "backbone"
+    HEAVY = "heavy"
+
+
+class StageType(int, Enum):
     """Enumeration of the types of stage."""
 
     RESTRAIN = 1
@@ -41,14 +47,14 @@ class StageType(_Enum):
             raise ValueError("Unknown stage type.")
 
 
-class LegType(_Enum):
+class LegType(int, Enum):
     """The type of leg in the calculation."""
 
     BOUND = 1
     FREE = 2
 
 
-class PreparationStage(_Enum):
+class PreparationStage(int, Enum):
     """The stage of preparation of the input files."""
 
     STRUCTURES_ONLY = 1

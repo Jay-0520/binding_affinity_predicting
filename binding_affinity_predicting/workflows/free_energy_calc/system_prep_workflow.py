@@ -226,17 +226,18 @@ def prepare_ensemble_equilibration_replicas(
 
 def run_complete_system_setup(
     *,
-    output_nametag: str,
     config: BaseWorkflowConfig = BaseWorkflowConfig(),
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
     water_path: Optional[str] = None,
+    filename_stem: str,
     output_dir: str,
     use_slurm: bool = True,
 ) -> BSS._SireWrappers._system.System:
 
+    # 1. get the pre-equilibrated system from source
     prepare_preequil_molecular_system(
-        filename_stem=output_nametag,
+        filename_stem=filename_stem,
         config=config,
         protein_path=protein_path,
         ligand_path=ligand_path,
@@ -244,11 +245,12 @@ def run_complete_system_setup(
         output_dir=output_dir,
         use_slurm=use_slurm,
     )
+    # 2. further equilibrate the system via BSS.Protocol.Production
     prepare_ensemble_equilibration_replicas(
-        source=output_nametag,
-        output_basename=os.path.join(output_dir, f"{output_nametag}_ensemble"),
+        source=filename_stem,
+        output_basename=os.path.join(output_dir, f"{filename_stem}_ensemble"),
         config=config,
-        filename_stem=output_nametag,
+        filename_stem=filename_stem,
         output_dir=output_dir,
     )
 

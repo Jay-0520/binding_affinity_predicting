@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
@@ -237,10 +236,10 @@ def run_ensemble_equilibration(
         # Must load a fresh system for each replica because BSS system is mutable in place
         system_copy = load_fresh_system(source)
 
-        if output_dir:
-            # hard-coded the folder name here
-            work_dir = os.path.join(output_dir, f"ensemble_equilibration_{ndx}")
-            os.makedirs(work_dir, exist_ok=True)
+        # if output_dir:
+        #     # hard-coded the folder name here
+        #     work_dir = os.path.join(output_dir, f"ensemble_equilibration_{ndx}")
+        #     os.makedirs(work_dir, exist_ok=True)
 
         filename_stem_updated = f"{filename_stem}_{ndx}"
         equilibrated_system = _equilibrating_system_bss(
@@ -250,7 +249,7 @@ def run_ensemble_equilibration(
             pressure_atm=_repeat.pressure,
             restraint=_repeat.restraint,
             timestep_fs=_repeat.timestep,
-            output_dir=work_dir,
+            output_dir=output_dir,
             filename_stem=filename_stem_updated,
             mdrun_options=mdrun_options,
             **extra_protocol_kwargs,
@@ -263,7 +262,7 @@ def run_ensemble_equilibration(
             system=equilibrated_system,
             # hard-appended "_{ndx}_final" to output filename
             filename_stem=f"{filename_stem}_{ndx}_final",
-            output_dir=work_dir,
+            output_dir=output_dir,
         )
 
     return systems

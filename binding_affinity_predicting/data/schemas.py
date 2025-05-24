@@ -1,25 +1,22 @@
 import logging
-from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from binding_affinity_predicting.data.enums import LegType, StageType
+from binding_affinity_predicting.data.enums import (
+    LegType,
+    SimulationRestraint,
+    StageType,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class RunnerConfig:
+class RunnerConfig(BaseModel):
     dg_multiplier: int = 1
     ensemble_size: int = 5
     dump: bool = True
-
-
-class SimulationRestraint(str, Enum):
-    ALL = "all"
-    BACKBONE = "backbone"
-    HEAVY = "heavy"
 
 
 class SystemPreparationConfig(BaseModel):
