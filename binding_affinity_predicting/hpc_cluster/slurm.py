@@ -1,8 +1,7 @@
 import logging
 import os
-from pathlib import Path
 from time import sleep
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable
 
 from binding_affinity_predicting.hpc_cluster.utils import get_slurm_file_base
 from binding_affinity_predicting.hpc_cluster.virtual_queue import VirtualQueue
@@ -12,7 +11,7 @@ logger.setLevel(logging.INFO)
 
 
 def run_slurm(
-    sys_prep_fn: Callable[..., None],
+    sys_prep_fn: Callable[..., Any],
     wait: bool,
     run_dir: str,
     job_name: str,
@@ -59,7 +58,8 @@ def run_slurm(
     kwarglist = ", ".join([f"{k}={repr(v)}" for k, v in fn_kwargs.items()])
     all_args = ", ".join([x for x in (arglist, kwarglist) if x])
     header_lines.append(
-        f"\npython -c 'from {sys_prep_fn.__module__} import {sys_prep_fn.__name__}; {sys_prep_fn.__name__}({all_args})'"
+        f"\npython -c 'from {sys_prep_fn.__module__} import {sys_prep_fn.__name__}; "
+        f"{sys_prep_fn.__name__}({all_args})'"
     )
     slurm_script = f"{run_dir}/{job_name}.sh"
     with open(slurm_script, "w") as file:

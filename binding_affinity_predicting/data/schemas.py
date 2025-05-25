@@ -45,7 +45,7 @@ class PreEquilStageConfig(BaseModel):
     Units: runtime (ps), temperature (K), restraint (all|backbone|heavy), pressure (atm).
     """
 
-    runtime: float
+    runtime: float  # ps
     temperature_start: float
     temperature_end: float
     restraint: Optional[SimulationRestraint]  # restraint can be None or a string

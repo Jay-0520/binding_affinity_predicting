@@ -236,11 +236,6 @@ def run_ensemble_equilibration(
         # Must load a fresh system for each replica because BSS system is mutable in place
         system_copy = load_fresh_system(source)
 
-        # if output_dir:
-        #     # hard-coded the folder name here
-        #     work_dir = os.path.join(output_dir, f"ensemble_equilibration_{ndx}")
-        #     os.makedirs(work_dir, exist_ok=True)
-
         filename_stem_updated = f"{filename_stem}_{ndx}"
         equilibrated_system = _equilibrating_system_bss(
             system=system_copy,

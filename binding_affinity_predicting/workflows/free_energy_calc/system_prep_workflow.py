@@ -17,12 +17,13 @@ from binding_affinity_predicting.simulation.system_preparation import (
     extract_restraint_from_traj,
     solvate_system,
 )
+from binding_affinity_predicting.simulation.utils import load_system_from_source
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def prepare_preequil_molecular_system(
+def prepare_equilibrated_molecular_systems(
     *,
     filename_stem: str,
     config: BaseWorkflowConfig = BaseWorkflowConfig(),
@@ -39,6 +40,7 @@ def prepare_preequil_molecular_system(
     2) Solvate
     3) Minimise
     4) Pre-equilibrate
+    5) Run ensemble equilibrations -> multiple repeated systems
 
     Parameters
     ----------
@@ -111,13 +113,12 @@ def prepare_preequil_molecular_system(
 
     # ── 4) PRE-EQUILIBRATE ───────────────────────────────────────────────
     logger.info("Step 4: Pre-equilibrate the system...")
-    # preequil_out = os.path.join(output_dir, f"{output_nametag}_preequiled.gro")
     preequil_kwargs = dict(
         source=system_energy_min,
         steps=config.param_preequilibration.steps,
-        mdrun_options=config.mdrun_options,
         filename_stem=f"{filename_stem}_preequiled",
         output_dir=output_dir,
+        mdrun_options=config.mdrun_options,
     )
 
     if use_slurm:
@@ -134,20 +135,46 @@ def prepare_preequil_molecular_system(
     else:
         system_preequil = preequilibrate_system(**preequil_kwargs)
 
-    logger.info("All steps complete!")
-    return system_preequil
+    # ── 5) RUN ENSEMBLE EQUILIBRATION ───────────────────────────────────────
+    logger.info("Step 5: Run ensemble equilibration...")
+    equil_kwargs = dict(
+        source=system_preequil,
+        replicas=config.param_ensemble_equilibration.replicas,
+        filename_stem=f"{filename_stem}_ensemble_equilibration",
+        output_dir=output_dir,
+        mdrun_options=config.mdrun_options,
+    )
+    if use_slurm:
+        run_slurm(
+            sys_prep_fn=run_ensemble_equilibration,
+            wait=True,
+            run_dir=output_dir,
+            job_name="ensemble_equilibration",
+            **equil_kwargs,
+        )
+        system_equil_list = [
+            BSS.IO.readMolecules(
+                os.path.join(
+                    output_dir, f"{filename_stem}_ensemble_equilibration_{ndx}.gro"
+                )
+            )
+            for ndx in range(1, config.param_ensemble_equilibration.num_replicas + 1)
+        ]
+    else:
+        system_equil_list = run_ensemble_equilibration(**equil_kwargs)
+
+    logger.info("Great! All steps complete!")
+    return system_equil_list
 
 
-def prepare_ensemble_equilibration_replicas(
+def prepare_restraints_from_ensemble_equilibration(
     *,
-    source: Union[str, BSS._SireWrappers._system.System],
-    filename_stem: str = "ensemble_equilibration",
-    output_dir: str,
+    source_list: Union[list[str], list[BSS._SireWrappers._system.System]],
+    work_dir: str,
     config: BaseWorkflowConfig = BaseWorkflowConfig(),
-    **extra_protocol_kwargs,
-) -> tuple[
-    list[BSS._SireWrappers._system.System], list[BSS.FreeEnergy._restraint.Restraint]
-]:
+    filename_stem: str,
+    **extra_restraint_kwargs,
+) -> list[BSS.FreeEnergy._restraint.Restraint]:
     """
     Run ensemble equilibration for the given system and
     extract restraints from trajectory for each replica.
@@ -156,10 +183,10 @@ def prepare_ensemble_equilibration_replicas(
 
     Parameters
     ----------
-    source : str or BSS._SireWrappers._system.System
-        The source system to equilibrate. If a string, it is treated as a path to the system file.
-    output_dir : str
-        Directory where the output files will be saved.
+    source_list : str or BSS._SireWrappers._system.System
+        List of source files (MUST BE .gro or .top files) or systems to load.
+    work_dir : str
+        Directory where the source files are located.
     filename_stem : str
         The stem of the filename to use for the output files.
     config : BaseWorkflowConfig
@@ -167,42 +194,31 @@ def prepare_ensemble_equilibration_replicas(
     extra_protocol_kwargs : dict
         Additional keyword arguments to pass to the equilibration function.
     """
-    # ensure the base output directory exists
-    os.makedirs(output_dir, exist_ok=True)
+    # load the system from the source
+    system_list = [load_system_from_source(source) for source in source_list]
 
-    # 1. Run the actual BSS equilibration
-    replicas = config.param_ensemble_equilibration.replicas
-    logger.info(f"Running ensemble equilibration with {len(replicas)} replicas...")
-
-    system_list = run_ensemble_equilibration(
-        source=source,
-        replicas=replicas,
-        filename_stem=filename_stem,
-        output_dir=output_dir,
-        mdrun_options=config.mdrun_options,
-        **extra_protocol_kwargs,
-    )
-
-    # 2. Now loop over each replicate and extract its restraint
     logger.info("Extracting restraints from each replica...")
     restraint_list = []
     for idx in range(1, len(system_list) + 1):
-        rep_dir = os.path.join(output_dir, f"ensemble_equilibration_{idx}")
-
-        # grab the exactly one .xtc
-        trajs = glob.glob(os.path.join(rep_dir, "*.xtc"))
+        # grab the exactly one .xtc for a given run, avoiding get #files
+        # run this function multiple times leads to multiple #files
+        trajs = glob.glob(
+            os.path.join(work_dir, f"{filename_stem}_ensemble_equilibration_{idx}.xtc")
+        )
         if len(trajs) != 1:
             raise RuntimeError(
-                f"Expected 1 trajectory in {rep_dir}, but found {len(trajs)}."
+                f"Expected 1 trajectory(XTC) for run_{idx} in {work_dir}, but found {len(trajs)}."
             )
         trajectory_file = trajs[0]
 
-        # grab the exactly one .tpr file.
+        # grab the exactly one .tpr file for a given run, avoiding get #files
         # NOTE tpr is forced to be the top file in BSS for restraint extraction
-        tops = glob.glob(os.path.join(rep_dir, "*.tpr"))
+        tops = glob.glob(
+            os.path.join(work_dir, f"{filename_stem}_ensemble_equilibration_{idx}.tpr")
+        )
         if len(tops) != 1:
             raise RuntimeError(
-                f"Expected 1 topology in {rep_dir}, but found {len(tops)}."
+                f"Expected 1 topology(TPR) in for run_{idx} in {work_dir}, but found {len(tops)}."
             )
         topology_file = tops[0]
 
@@ -211,32 +227,43 @@ def prepare_ensemble_equilibration_replicas(
             idx - 1
         ].temperature
         restraint = extract_restraint_from_traj(
-            work_dir=rep_dir,
+            work_dir=work_dir,
             trajectory_file=trajectory_file,
             topology_file=topology_file,
             system=system_list[idx - 1],
-            output_filename=f"restraint_{idx}.itp",  # GROMACS format for restraints
+            # GROMACS format for restraints, if output_filename provided, save
+            # restraint to {work_dir}/{output_filename}
+            output_filename=f"restraint_{idx}.itp",
             temperature=temperature_equil,
             append_to_ligand_selection=config.append_to_ligand_selection,
+            restraint_idx=idx,  # Make sure results are named correctly
+            **extra_restraint_kwargs,
         )
         restraint_list.append(restraint)
 
-    return system_list, restraint_list
+    return restraint_list
 
 
-def run_complete_system_setup(
+def move_and_create_files():
+    """
+    Move files to the correct location and create any necessary files.
+    """
+    pass
+
+
+def run_complete_system_setup_bound_and_free(
     *,
-    config: BaseWorkflowConfig = BaseWorkflowConfig(),
     protein_path: Optional[str] = None,
     ligand_path: Optional[str] = None,
     water_path: Optional[str] = None,
+    config: BaseWorkflowConfig = BaseWorkflowConfig(),
     filename_stem: str,
     output_dir: str,
     use_slurm: bool = True,
 ) -> BSS._SireWrappers._system.System:
 
-    # 1. get the pre-equilibrated system from source
-    prepare_preequil_molecular_system(
+    # 1. get the equilibrated systems from source
+    equil_system_list = prepare_equilibrated_molecular_systems(
         filename_stem=filename_stem,
         config=config,
         protein_path=protein_path,
@@ -245,21 +272,13 @@ def run_complete_system_setup(
         output_dir=output_dir,
         use_slurm=use_slurm,
     )
-    # 2. further equilibrate the system via BSS.Protocol.Production
-    prepare_ensemble_equilibration_replicas(
-        source=filename_stem,
-        output_basename=os.path.join(output_dir, f"{filename_stem}_ensemble"),
+    # 2. extract restraints from the equilibrated systems
+    equil_system_list, _ = prepare_restraints_from_ensemble_equilibration(
+        source_list=equil_system_list,
         config=config,
         filename_stem=filename_stem,
-        output_dir=output_dir,
+        work_dir=output_dir,
     )
-
-
-def move_and_create_files():
-    """
-    Move files to the correct location and create any necessary files.
-    """
-    pass
 
 
 def prepare_fep_simulation_systems():

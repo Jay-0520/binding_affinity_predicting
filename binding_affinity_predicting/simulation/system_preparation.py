@@ -158,6 +158,7 @@ def extract_restraint_from_traj(
     output_filename: Optional[str] = None,
     temperature: float = 300.0,
     append_to_ligand_selection: str = "",
+    **extra_restraint_kwargs,
 ) -> BSS.FreeEnergy._restraint.Restraint:  # type: ignore
     """
     For a BOUND leg, loop over trajectories in each outdir,
@@ -208,6 +209,7 @@ def extract_restraint_from_traj(
         work_dir=work_dir,
         temperature=temperature,
         append_to_ligand_selection=append_to_ligand_selection,
+        **extra_restraint_kwargs,
     )
     if restraint is None:
         raise ValueError(f"No restraint found in {work_dir} for {trajectory_file}")

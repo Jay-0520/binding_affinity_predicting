@@ -250,6 +250,12 @@ def load_system_from_source(
     If `source` is already a System, return it unchanged.
     If it's a path ending in .gro or .top, assume its partner file
     (same stem, other extension) lives alongside it and load both.
+
+    Parameters
+    ----------
+    source : str or BSS._SireWrappers._system.System
+        Path to the input file or an existing BioSimSpace System.
+        input file MUST BE a GROMACS .gro or .top file.
     """
     if not isinstance(source, str):
         return source
@@ -282,14 +288,16 @@ def load_fresh_system(
     - If `source` is a str, delegate to load_system_from_source(().
     - If `source` is already a System, dump it to a temp GRO/TOP pair
       and re-load so that further mutations don't affect the original.
+      and always return a fresh copy
     """
     if isinstance(source, str):
         return load_system_from_source(source)
 
     # source is a System: snapshot to disk then re-load
     with tempfile.TemporaryDirectory(prefix="bss_sys_") as td:
-        gro_path = os.path.join(td, "temp_system.gro")
-        BSS.IO.saveMolecules(gro_path, source, fileformat=["gro87", "grotop"])
+        base_path = os.path.join(td, "temp_system")
+        BSS.IO.saveMolecules(base_path, source, fileformat=["gro87", "grotop"])
+        gro_path = base_path + ".gro"
         fresh = load_system_from_source(source=gro_path)
 
     return fresh
