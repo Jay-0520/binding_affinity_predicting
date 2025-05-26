@@ -1,7 +1,6 @@
 import glob
 import logging
 import os
-from pathlib import Path
 from typing import Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
@@ -21,7 +20,6 @@ from binding_affinity_predicting.simulation.system_preparation import (
 )
 from binding_affinity_predicting.simulation.utils import (
     load_system_from_source,
-    move_link_and_create_files,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,7 +79,7 @@ def _prepare_equilibrated_molecular_systems(
         ligand_ff=config.param_system_prep.forcefields["ligand"],
         water_ff=config.param_system_prep.forcefields["water"],
         water_model=config.param_system_prep.water_model,
-        filename_stem=filename_stem,
+        filename_stem=f"{filename_stem}{PreparationStage.PARAMETERISED.file_suffix}",
         output_dir=output_dir,
     )
 
@@ -99,7 +97,7 @@ def _prepare_equilibrated_molecular_systems(
     logger.info("Step 3: Energy minimise the system...")
     min_kwargs = dict(
         source=system_solvated,
-        filename_stem=f"{filename_stem}_minimised",
+        filename_stem=f"{filename_stem}{PreparationStage.MINIMISED.file_suffix}",
         output_dir=output_dir,
         min_steps=config.param_energy_minimisation.steps,
         mdrun_options=config.mdrun_options,
@@ -127,7 +125,7 @@ def _prepare_equilibrated_molecular_systems(
     preequil_kwargs = dict(
         source=system_energy_min,
         steps=config.param_preequilibration.steps,
-        filename_stem=f"{filename_stem}_preequiled",
+        filename_stem=f"{filename_stem}{PreparationStage.PREEQUILIBRATED.file_suffix}",
         output_dir=output_dir,
         mdrun_options=config.mdrun_options,
     )
@@ -154,7 +152,7 @@ def _prepare_equilibrated_molecular_systems(
     equil_kwargs = dict(
         source=system_preequil,
         replicas=config.param_ensemble_equilibration.replicas,
-        filename_stem=f"{filename_stem}_ensemble_equilibration",
+        filename_stem=f"{filename_stem}{PreparationStage.EQUILIBRATED.file_suffix}",
         output_dir=output_dir,
         mdrun_options=config.mdrun_options,
     )
@@ -263,23 +261,23 @@ def _prepare_restraints_from_ensemble_equilibration(
     return restraint_list
 
 
-def _move_and_create_files(input_dir: str, output_dir: str, filename_stem: str):
-    """
-    Move files to the correct location and create any necessary files.
+# def _move_and_create_files(input_dir: str, output_dir: str, filename_stem: str):
+#     """
+#     Move files to the correct location and create any necessary files.
 
-    Parameters
-    ----------
-    input_dir : str
-        Directory where the equilibration files are located.
-    output_dir : str
-        Directory where the files should be moved to.
-    """
-    output_bound_dir = Path(output_dir) / "bound"
-    output_bound_dir.mkdir(parents=True, exist_ok=True)
-    for dir_name in ["discharge", "restrain", "vanish"]:
-        os.makedirs(Path(output_bound_dir) / dir_name, exist_ok=True)
+#     Parameters
+#     ----------
+#     input_dir : str
+#         Directory where the equilibration files are located.
+#     output_dir : str
+#         Directory where the files should be moved to.
+#     """
+#     output_bound_dir = Path(output_dir) / "bound"
+#     output_bound_dir.mkdir(parents=True, exist_ok=True)
+#     for dir_name in ["discharge", "restrain", "vanish"]:
+#         os.makedirs(Path(output_bound_dir) / dir_name, exist_ok=True)
 
-        move_link_and_create_files()
+#         move_link_and_create_files()
 
 
 def run_complete_system_setup_bound_and_free(
@@ -304,7 +302,7 @@ def run_complete_system_setup_bound_and_free(
         use_slurm=use_slurm,
     )
     # 2. extract restraints from the equilibrated systems
-    restraint_list = _prepare_restraints_from_ensemble_equilibration(
+    _ = _prepare_restraints_from_ensemble_equilibration(
         source_list=equil_system_list,
         config=config,
         filename_stem=filename_stem,

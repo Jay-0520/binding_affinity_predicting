@@ -1,30 +1,17 @@
-import copy
 import logging
 import os
 import pathlib
-import pickle
-import subprocess
 from abc import ABC
 from itertools import count
-from pathlib import Path
 from time import sleep
-from typing import Any, Optional, Tuple, Union
-
-import numpy as np
-import pandas as pd
-import scipy.stats as stats
+from typing import Optional
 
 from binding_affinity_predicting.components.utils import (
-    dump_simulation_state,
     ensure_dir_exist,
-    load_simulation_state,
 )
 
 logger = logging.getLogger(__name__)
-# from ..analyse.exceptions import AnalysisError as _AnalysisError
-# from ..analyse.plot import plot_convergence as _plot_convergence
-# from ..analyse.plot import plot_sq_sem_convergence as _plot_sq_sem_convergence
-# from ._logging_formatters import _A3feFileFormatter, _A3feStreamFormatter
+logger.setLevel(logging.INFO)
 
 
 class SimulationRunner(ABC):
@@ -79,7 +66,8 @@ class SimulationRunner(ABC):
             # Save state or not
             if save_state_on_init:
                 logger.info(
-                    f"Saving {self.__class__.__name__} state to {self.input_dir}/{self.__class__.__name__}.pkl"
+                    f"Saving {self.__class__.__name__} state "
+                    f"to {self.input_dir}/{self.__class__.__name__}.pkl"
                 )
 
     def _init_runtime_attributes(self) -> None:
@@ -171,7 +159,10 @@ class SimulationRunner(ABC):
 
     @property
     def tot_simtime(self) -> float:
-        f"""The total simulation time in ns for the {self.__class__.__name__} and any sub-simulation runners."""
+        """
+        The total simulation time in ns for the {self.__class__.__name__} and
+        any sub-simulation runners.
+        """
         return sum(
             [
                 sub_sim_runner.get_tot_simulation_time()
@@ -181,7 +172,10 @@ class SimulationRunner(ABC):
 
     @property
     def tot_gpu_time(self) -> float:
-        f"""The total simulation time in GPU hours for the {self.__class__.__name__} and any sub-simulation runners."""
+        """
+        The total simulation time in GPU hours for the {self.__class__.__name__}
+        and any sub-simulation runners.
+        """
         return sum(
             [
                 sub_sim_runner.get_tot_gpu_time()
@@ -258,7 +252,8 @@ class SimulationRunner(ABC):
             # Check that the run numbers correspond to valid runs
             if any([run_no > self.ensemble_size for run_no in run_nos]):
                 raise ValueError(
-                    f"Invalid run numbers {run_nos}. All run numbers must be less than or equal to {self.ensemble_size}"
+                    f"Invalid run numbers {run_nos}. All run numbers must be less than "
+                    "or equal to {self.ensemble_size}"
                 )
             # Check that no run numbers are repeated
             if len(run_nos) != len(set(run_nos)):
@@ -319,7 +314,8 @@ class SimulationRunner(ABC):
     def _dump(self) -> None:
         """Dump the current state of the simulation object to a pickle file, and do
         the same for any sub-simulations."""
-        with open(f"{self.base_dir}/{self.__class__.__name__}.pkl", "wb") as ofile:
-            pickle.dump(self._picklable_copy.__dict__, ofile)
-        for sub_sim_runner in self._sub_sim_runners:
-            sub_sim_runner._dump()
+        # with open(f"{self.output_dir}/{self.__class__.__name__}.pkl", "wb") as ofile:
+        #     pickle.dump(self._picklable_copy.__dict__, ofile)
+        # for sub_sim_runner in self._sub_sim_runners:
+        #     sub_sim_runner._dump()
+        pass

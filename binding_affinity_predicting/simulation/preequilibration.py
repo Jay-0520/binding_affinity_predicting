@@ -4,6 +4,7 @@ from typing import Optional, Sequence, Union
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
 from binding_affinity_predicting.components.utils import check_has_wat_and_box
+from binding_affinity_predicting.data.enums import PreparationStage
 from binding_affinity_predicting.data.schemas import (
     EnsembleEquilibrationReplicaConfig,
     PreEquilStageConfig,
@@ -22,7 +23,7 @@ logger.setLevel(logging.INFO)
 
 def energy_minimise_system(
     source: Union[str, BSS._SireWrappers._system.System],
-    filename_stem: str = "minimised",
+    filename_stem: str = PreparationStage.MINIMISED.file_suffix,
     output_dir: Optional[str] = None,
     min_steps: int = 1_000,
     mdrun_options: Optional[str] = None,
@@ -91,7 +92,7 @@ def energy_minimise_system(
 def preequilibrate_system(
     source: Union[str, BSS._SireWrappers._system.System],
     steps: Sequence[Union[PreEquilStageConfig, dict]],
-    filename_stem: str = "preequilibration",
+    filename_stem: str = PreparationStage.PREEQUILIBRATED.file_suffix,
     output_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
     **extra_protocol_kwargs,
@@ -182,7 +183,7 @@ def preequilibrate_system(
 def run_ensemble_equilibration(
     source: Union[str, BSS._SireWrappers._system.System],
     replicas: Sequence[Union[EnsembleEquilibrationReplicaConfig, dict]],
-    filename_stem: str = "ensemble_equilibration",
+    filename_stem: str = PreparationStage.EQUILIBRATED.file_suffix,
     output_dir: Optional[str] = None,
     mdrun_options: Optional[str] = None,
     **extra_protocol_kwargs,
