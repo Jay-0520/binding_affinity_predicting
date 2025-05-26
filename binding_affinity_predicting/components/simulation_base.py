@@ -2,6 +2,7 @@ import copy
 import logging
 import os
 import pathlib
+import pickle
 import subprocess
 from abc import ABC
 from itertools import count
@@ -310,3 +311,15 @@ class SimulationRunner(ABC):
     # TDDO: maybe not needed
     def add_subrunner(self, runner: "SimulationRunner") -> None:
         raise NotImplementedError()
+
+    def save(self) -> None:
+        """Save the current state of the simulation object to a pickle file."""
+        self._dump()
+
+    def _dump(self) -> None:
+        """Dump the current state of the simulation object to a pickle file, and do
+        the same for any sub-simulations."""
+        with open(f"{self.base_dir}/{self.__class__.__name__}.pkl", "wb") as ofile:
+            pickle.dump(self._picklable_copy.__dict__, ofile)
+        for sub_sim_runner in self._sub_sim_runners:
+            sub_sim_runner._dump()

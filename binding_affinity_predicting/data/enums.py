@@ -53,6 +53,16 @@ class LegType(int, Enum):
     BOUND = 1
     FREE = 2
 
+    @property
+    def name(self) -> str:
+        """Return the name of the leg type."""
+        if self == LegType.BOUND:
+            return "bound"
+        elif self == LegType.FREE:
+            return "free"
+        else:
+            raise ValueError(f"Unknown leg type: {self}")
+
 
 class PreparationStage(int, Enum):
     """The stage of preparation of the input files."""
@@ -62,6 +72,7 @@ class PreparationStage(int, Enum):
     SOLVATED = 3
     MINIMISED = 4
     PREEQUILIBRATED = 5
+    EQUILIBRATED = 6
 
     @property
     def file_suffix(self) -> str:
@@ -69,13 +80,15 @@ class PreparationStage(int, Enum):
         if self == PreparationStage.STRUCTURES_ONLY:
             return ""
         elif self == PreparationStage.PARAMETERISED:
-            return "_param"
+            return ""
         elif self == PreparationStage.SOLVATED:
-            return "_solv"
+            return "_solvated"
         elif self == PreparationStage.MINIMISED:
-            return "_min"
+            return "_minimised"
         elif self == PreparationStage.PREEQUILIBRATED:
-            return "_preequil"
+            return "_preequiled"
+        elif self == PreparationStage.EQUILIBRATED:
+            return "_equilibrated"
         else:
             raise ValueError(f"Unknown preparation stage: {self}")
 

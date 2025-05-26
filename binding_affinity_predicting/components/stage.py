@@ -2,45 +2,40 @@ from pathlib import Path
 
 from binding_affinity_predicting.components.lambda_window import LambdaWindow
 from binding_affinity_predicting.components.simulation_base import SimulationRunner
+from binding_affinity_predicting.data.enums import StageType
 
 
 class Stage(SimulationRunner):
-    runtime_attributes = {"_finished": False, "_failed": False, "_dg": None}
-
     def __init__(
         self,
-        stage_type: str,
-        lam_list: list[float],
+        stage_type: StageType,
         input_dir: str,
         output_dir: str,
-        sim_params: dict,
-        run_index=1,
     ):
         super().__init__(input_dir, output_dir, ensemble_size=1)
         self.stage_type = stage_type
-        self.lam_list = lam_list
-        self.run_index = run_index
-        self._sub_sim_runners = [
-            LambdaWindow(
-                lam=lam,
-                input_dir=input_dir,
-                output_dir=output_dir,
-                sim_params=sim_params,
-                run_index=run_index,
-            )
-            for lam in lam_list
-        ]
+        # create lam windows
+        # e.g., lam_list from config, here stub with [0.0,1.0]
+        lam_list = [0.0, 1.0]
+        self._sub_sim_runners = [self._make_window(lam) for lam in lam_list]
+
+    def _make_window(self, lam: float):
+        from binding_affinity_predicting.components.lambda_window import LambdaWindow
+
+        return LambdaWindow(
+            lam_state=lam,
+            input_dir=self.input_dir,
+            output_dir=self.output_dir,
+            sim_params={},
+            run_index=1,
+        )
 
     def setup(self):
-        for sim_runner in self._sub_sim_runners:
-            sim_runner.setup()
+        for w in self._sub_sim_runners:
+            w.setup()
 
-    def run(self, run_nos=None, *args, **kwargs):
-        for sim_runner in self._sub_sim_runners:
-            sim_runner.run(run_nos=run_nos, *args, **kwargs)
-        self._finished = all(sr._finished for sr in self._sub_sim_runners)
-        self._failed = any(sr._failed for sr in self._sub_sim_runners)
-
-    @property
-    def failed_simulations(self):
-        return [fail for w in self._sub_sim_runners for fail in w.failed_simulations]
+    def run(self, *args, **kwargs):
+        for w in self._sub_sim_runners:
+            w.run(*args, **kwargs)
+        self._finished = all(w._finished for w in self._sub_sim_runners)
+        self._failed = any(w._failed for w in self._sub_sim_runners)

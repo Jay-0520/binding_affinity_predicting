@@ -1,9 +1,10 @@
 import logging
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule  # type: ignore[import]
