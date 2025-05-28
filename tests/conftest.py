@@ -18,7 +18,7 @@ def pytest_configure():
 
 
 @pytest.fixture(scope="module")
-def example_structures(tmp_path_factory):
+def example_structures(tmp_path_factory) -> str:
     """
     Copy the real PDB/SDF test files into a temp directory once
     and give its path to any test that needs it.
@@ -30,6 +30,6 @@ def example_structures(tmp_path_factory):
 
 
 @pytest.fixture(scope="function")
-def out_dir(tmp_path):
+def out_dir(tmp_path) -> Path:
     """A fresh empty directory for writing outputs."""
     return tmp_path / "out"
