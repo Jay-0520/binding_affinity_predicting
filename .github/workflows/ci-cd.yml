@@ -41,5 +41,17 @@ jobs:
       - name: Install test deps
         run: pip install .[test]
 
-      - name: Run tests
-        run: conda run -n binding_env pytest --maxfail=1 --disable-warnings -q
+      - name: Run tests (with debug)
+        shell: bash -lc
+        run: |
+          # Show all Conda envs and highlight the active one
+          conda info --envs
+          # Print the prefix of the current env
+          echo "CONDA_PREFIX is: $CONDA_PREFIX"
+          # Which python are we using?
+          which python
+          python --version
+          # List installed packages so we can confirm BioSimSpace is there
+          conda list | grep -i biosimspace || echo "BioSimSpace not found!"
+          # Finally run pytest
+          pytest --maxfail=1 --disable-warnings -q
