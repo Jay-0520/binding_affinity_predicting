@@ -20,7 +20,7 @@ jobs:
           python-version: 3.11
 
       - name: Cache Conda packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.conda/pkgs
           key: ${{ runner.os }}-conda-pkgs-${{ hashFiles('environment.yaml') }}
