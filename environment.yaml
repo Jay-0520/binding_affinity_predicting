@@ -1,0 +1,12 @@
+name: binding_env
+channels:
+  - conda-forge
+  - "openbiosim/label/dev"
+dependencies:
+  - python>=3.9,<3.12
+  - numpy
+  - pandas
+  - scipy
+  - pydantic
+  - ambertools
+  - biosimspace>2023.4 # has to be installed via conda
