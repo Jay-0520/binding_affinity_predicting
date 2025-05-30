@@ -42,5 +42,8 @@ jobs:
         run: pip install .[test]
 
       - name: Run tests
+        shell: bash -l {0}
         run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate binding_env
           pytest --maxfail=1 --disable-warnings -q
