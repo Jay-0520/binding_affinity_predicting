@@ -11,19 +11,23 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+          auto-update-conda: true
+          environment-file: environment.yml
+          activate-environment: bap_env
+
       - name: Run tests
         run: pytest --maxfail=1 --disable-warnings -q
 
   docker-build-and-push:
     needs: build-and-test
     runs-on: ubuntu-latest
+    # only run on actual pushes to main, not on pull_request events
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v3
       - name: Build Docker image
