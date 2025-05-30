@@ -1,6 +1,6 @@
-# ignore all egg-info dirs
+# Byte‐compiled files
 __pycache__/
-*.egg-info/
+*$py.class
 .flake8
 
 # Distribution / packaging
