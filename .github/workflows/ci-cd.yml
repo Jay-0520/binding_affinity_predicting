@@ -10,15 +10,30 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Conda
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache Conda packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.conda/pkgs
+          key: ${{ runner.os }}-conda-pkgs-${{ hashFiles('environment.yaml') }}
+  
+      - name: Set up Conda (with Mamba)
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
+          use-mamba: true
           environment-file: environment.yaml
-          activate-environment: binding_env 
+          activate-environment: binding_env
 
       - name: Install package
         run: |
