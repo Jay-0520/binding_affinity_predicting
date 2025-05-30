@@ -38,6 +38,9 @@ jobs:
           # no-deps so we rely on conda for everything else
           pip install --no-deps .
 
+      - name: Install test deps
+        run: pip install .[test]
+
       - name: Run tests
         run: |
           pytest --maxfail=1 --disable-warnings -q
