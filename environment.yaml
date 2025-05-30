@@ -9,4 +9,4 @@ dependencies:
   - scipy
   - pydantic
   - ambertools
-  - biosimspace>2023.4 # has to be installed via conda
+  - biosimspace>=2023.4 # has to be installed via conda
