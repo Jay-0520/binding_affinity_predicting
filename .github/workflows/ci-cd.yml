@@ -17,7 +17,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          environment-file: environment.yml
+          environment-file: environment.yaml
           activate-environment: binding_env 
 
       - name: Install package
