@@ -1,6 +1,6 @@
 import os
 
-import BioSimSpace as BSS
+import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 import pytest
 
 from binding_affinity_predicting.simulation.parameterise import (
