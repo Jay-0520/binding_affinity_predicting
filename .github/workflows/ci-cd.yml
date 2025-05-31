@@ -53,19 +53,6 @@ jobs:
           conda list | grep -i biosimspace || echo ">>> BioSimSpace not found! <<<"
           source "$(conda info --base)/etc/profile.d/conda.sh"
           conda activate binding_env
-
-          python - <<'PYCODE'
-          import os, sys
-          # Find where the package directory is
-          import pkgutil, biosimspace, BioSimSpace  # try importing both
-          for candidate in ("BioSimSpace", "biosimspace"):
-              try:
-                  mod = __import__(candidate)
-                  path = os.path.dirname(mod.__file__)
-                  print(f"Module '{candidate}' actually lives at: {path}")
-              except ImportError:
-                  print(f"Module '{candidate}' import failed.")
-          PYCODE
-
+          echo "=== Running tests ==="
           echo "Now running pytest…"
           pytest --maxfail=1 --disable-warnings -q
