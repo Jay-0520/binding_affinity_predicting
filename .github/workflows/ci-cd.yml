@@ -42,16 +42,14 @@ jobs:
         run: pip install .[test]
 
       - name: Run tests (with debug)
-        shell: bash -lc
+        shell: bash -l {0}
         run: |
-          # Show all Conda envs and highlight the active one
+          echo "=== conda environments ==="
           conda info --envs
-          # Print the prefix of the current env
           echo "CONDA_PREFIX is: $CONDA_PREFIX"
-          # Which python are we using?
-          which python
-          python --version
-          # List installed packages so we can confirm BioSimSpace is there
-          conda list | grep -i biosimspace || echo "BioSimSpace not found!"
-          # Finally run pytest
+          echo "which python? $(which python)"
+          echo "python version: $(python --version)"
+          echo "Looking for BioSimSpace…"
+          conda list | grep -i biosimspace || echo ">>> BioSimSpace not found! <<<"
+          echo "Now running pytest…"
           pytest --maxfail=1 --disable-warnings -q
