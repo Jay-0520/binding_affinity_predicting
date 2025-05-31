@@ -1,11 +1,6 @@
 import os
 
-try:
-    import BioSimSpace.Sandpit.Exscientia as BSS
-except ImportError:
-    print('now trying import biosimspace.Sandpit.Exscientia')
-    import biosimspace.Sandpit.Exscientia as BSS
-
+import BioSimSpace as BSS
 import pytest
 
 from binding_affinity_predicting.simulation.parameterise import (

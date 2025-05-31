@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Optional
 
-import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
+import BioSimSpace as BSS  # type: ignore[import]
 
 from binding_affinity_predicting.simulation.utils import (
     rename_lig,
