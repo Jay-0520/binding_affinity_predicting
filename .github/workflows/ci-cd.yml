@@ -41,31 +41,20 @@ jobs:
       - name: Install test deps
         run: pip install .[test]
 
-      - name: Run tests (with debug)
+      # 5) Now **in a single login shell**, install everything and run pytest
+      - name: Install & run tests (inside binding_env)
         shell: bash -l {0}
         run: |
-          echo "=== conda environments ==="
-          conda info --envs
-          echo "CONDA_PREFIX is: $CONDA_PREFIX"
-          echo "which python? $(which python)"
-          echo "python version: $(python --version)"
-          echo "Looking for BioSimSpace…"
-          conda list | grep -i biosimspace || echo ">>> BioSimSpace not found! <<<"
-
+          #  Activate the conda environment
           source "$(conda info --base)/etc/profile.d/conda.sh"
           conda activate binding_env
 
-          # Quick sanity check
+           # Confirm we are using the conda env’s python & pytest
           echo "Which python? $(which python)"
           echo "Python version: $(python --version)"
-          python - <<'PYCODE'
-          try:
-          import BioSimSpace
-          print("✅ BioSimSpace is installed at:", BioSimSpace.__file__)
-          except ImportError:
-          print("❌ ERROR: BioSimSpace cannot be imported. Abort.")
-          exit(1)
-          PYCODE
+          echo "Which pytest?  $(which pytest || echo 'pytest not found yet')"
 
-          # Finally, run pytest!
+          pip install --no-deps .
+          pip install .[test]
+
           pytest --maxfail=1 --disable-warnings -q
