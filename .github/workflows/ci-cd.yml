@@ -51,6 +51,7 @@ jobs:
           echo "python version: $(python --version)"
           echo "Looking for BioSimSpace…"
           conda list | grep -i biosimspace || echo ">>> BioSimSpace not found! <<<"
+
           source "$(conda info --base)/etc/profile.d/conda.sh"
           conda activate binding_env
 
@@ -66,7 +67,7 @@ jobs:
               except ImportError:
                   print(f"[FAIL] Module '{candidate}' import failed.")
           PYCODE
-
-
+  
+          echo "which pytest? $(which pytest)"
           echo "Now running pytest…"
           pytest --maxfail=1 --disable-warnings -q
