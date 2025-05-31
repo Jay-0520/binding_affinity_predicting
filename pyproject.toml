@@ -11,19 +11,14 @@ authors = [
   { name = "Jingjing Huang", email = "jjhuang@example.com" }
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.12"
 # production dependencies:
 dependencies = [
-     "arviz",
      "numpy",
      "pandas",
-     "matplotlib",
      "scipy",
-     "ipython",
-     "pymbar<4",
-     "pydantic=2.11.5",
-     "biosimspace",   # double check pkg name
-]
+     "pydantic==2.11.5",
+     ]
 
 [project.urls]
 Repository = "https://github.com/Jay-0520/binding_affinity_predicting"

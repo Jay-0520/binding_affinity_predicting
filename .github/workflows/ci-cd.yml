@@ -1,0 +1,46 @@
+# .github/workflows/ci-cd.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Cache Conda packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conda/pkgs
+          key: ${{ runner.os }}-conda-pkgs-${{ hashFiles('environment.yaml') }}
+  
+      - name: Set up Conda (with Mamba)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          use-mamba: true
+          environment-file: environment.yaml
+          activate-environment: binding_env
+
+      - name: Install & run tests (inside binding_env)
+        shell: bash -l {0}
+        run: |
+          source "$(conda info --base)/etc/profile.d/conda.sh"
+          conda activate binding_env
+
+          pip install --no-deps .
+          pip install .[test]
+     
+          echo "Running tests..."
+          pytest --maxfail=1 --disable-warnings -q
