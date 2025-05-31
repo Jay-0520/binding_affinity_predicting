@@ -33,15 +33,7 @@ jobs:
           environment-file: environment.yaml
           activate-environment: binding_env
 
-      - name: Install package
-        run: |
-          # no-deps so we rely on conda for everything else
-          pip install --no-deps .
-
-      - name: Install test deps
-        run: pip install .[test]
-
-      # 5) Now **in a single login shell**, install everything and run pytest
+      # Now **in a single login shell**, install everything and run pytest
       - name: Install & run tests (inside binding_env)
         shell: bash -l {0}
         run: |
