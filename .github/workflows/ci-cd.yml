@@ -55,19 +55,17 @@ jobs:
           source "$(conda info --base)/etc/profile.d/conda.sh"
           conda activate binding_env
 
+          # Quick sanity check
+          echo "Which python? $(which python)"
+          echo "Python version: $(python --version)"
           python - <<'PYCODE'
-          import os, sys
-
-          candidates = ["BioSimSpace", "biosimspace"]
-          for candidate in candidates:
-              try:
-                  mod = __import__(candidate)
-                  path = os.path.dirname(mod.__file__)
-                  print(f"[OK] Module '{candidate}' lives at: {path}")
-              except ImportError:
-                  print(f"[FAIL] Module '{candidate}' import failed.")
+          try:
+          import BioSimSpace
+          print("✅ BioSimSpace is installed at:", BioSimSpace.__file__)
+          except ImportError:
+          print("❌ ERROR: BioSimSpace cannot be imported. Abort.")
+          exit(1)
           PYCODE
-  
-          echo "which pytest? $(which pytest)"
-          echo "Now running pytest…"
+
+          # Finally, run pytest!
           pytest --maxfail=1 --disable-warnings -q
