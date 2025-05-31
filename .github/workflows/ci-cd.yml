@@ -33,18 +33,11 @@ jobs:
           environment-file: environment.yaml
           activate-environment: binding_env
 
-      # Now **in a single login shell**, install everything and run pytest
       - name: Install & run tests (inside binding_env)
         shell: bash -l {0}
         run: |
-          #  Activate the conda environment
           source "$(conda info --base)/etc/profile.d/conda.sh"
           conda activate binding_env
-
-           # Confirm we are using the conda env’s python & pytest
-          echo "Which python? $(which python)"
-          echo "Python version: $(python --version)"
-          echo "Which pytest?  $(which pytest || echo 'pytest not found yet')"
 
           pip install --no-deps .
           pip install .[test]
