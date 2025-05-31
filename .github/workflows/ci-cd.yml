@@ -53,6 +53,20 @@ jobs:
           conda list | grep -i biosimspace || echo ">>> BioSimSpace not found! <<<"
           source "$(conda info --base)/etc/profile.d/conda.sh"
           conda activate binding_env
-          echo "=== Running tests ==="
+
+          python - <<'PYCODE'
+          import os, sys
+
+          candidates = ["BioSimSpace", "biosimspace"]
+          for candidate in candidates:
+              try:
+                  mod = __import__(candidate)
+                  path = os.path.dirname(mod.__file__)
+                  print(f"[OK] Module '{candidate}' lives at: {path}")
+              except ImportError:
+                  print(f"[FAIL] Module '{candidate}' import failed.")
+          PYCODE
+
+
           echo "Now running pytest…"
           pytest --maxfail=1 --disable-warnings -q
