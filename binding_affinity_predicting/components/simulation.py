@@ -1,6 +1,5 @@
 import logging
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -22,6 +21,7 @@ class Simulation:
         top_file=None,
         extra_files=None,
         run_index=1,
+        extra_params=None,
     ):
         """
         Parameters
@@ -37,6 +37,7 @@ class Simulation:
         self.top_file = top_file
         self.extra_files = extra_files or []
         self.run_index = run_index
+        self.extra_params = extra_params or {}
         self.tpr_file = os.path.join(
             self.work_dir, f"lambda_{lam_state}_run{run_index}.tpr"
         )
@@ -60,7 +61,8 @@ class Simulation:
             raise ValueError("Lambda state must be equal to or larger than 0.")
         else:
             logger.info(
-                f"Running simulation {self.__class__.__name__} with Lambda state: {self.lam_state}..."
+                f"Running simulation {self.__class__.__name__} with Lambda state:"
+                f" {self.lam_state}..."
             )
 
     def setup(self):
@@ -81,14 +83,6 @@ class Simulation:
 
         self.mdp_file = mdp_file
 
-        # Copy .gro, .top, and extra files to self.work_dir
-        if self.gro_file:
-            shutil.copy(self.gro_file, self.work_dir)
-        if self.top_file:
-            shutil.copy(self.top_file, self.work_dir)
-        for extra in self.extra_files:
-            shutil.copy(extra, self.work_dir)
-
     def run(self):
         # 1. gmx grompp
         logger.info(f"Preparing tpr for lambda {self.lam} in {self.work_dir}")
@@ -107,7 +101,7 @@ class Simulation:
         try:
             subprocess.run(grompp_cmd, cwd=self.work_dir, check=True)
         except subprocess.CalledProcessError as e:
-            logger.error(f"grompp failed for λ={self.lam} in {self.work_dir}")
+            logger.error(f"grompp failed for λ={self.lam} in {self.work_dir}: {e}")
             self.failed = True
             return
 
@@ -123,7 +117,7 @@ class Simulation:
             subprocess.run(mdrun_cmd, cwd=self.work_dir, check=True)
             self.finished = True
         except subprocess.CalledProcessError as e:
-            logger.error(f"mdrun failed for λ={self.lam} in {self.work_dir}")
+            logger.error(f"mdrun failed for λ={self.lam} in {self.work_dir}: {e}")
             self.failed = True
 
     @property

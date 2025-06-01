@@ -3,8 +3,9 @@ import os
 import pathlib
 from abc import ABC
 from itertools import count
+from pathlib import Path
 from time import sleep
-from typing import Optional
+from typing import Optional, Sequence
 
 from binding_affinity_predicting.components.utils import (
     ensure_dir_exist,
@@ -34,7 +35,7 @@ class SimulationRunner(ABC):
     # Create a dict of attributes which can be modified by algorithms when
     # running the simulation, but which should be reset if the user wants to
     # re-run. This takes the form {attribute_name: reset_value}
-    runtime_attributes = {}
+    runtime_attributes: dict = {}
 
     def __init__(
         self,
@@ -49,8 +50,8 @@ class SimulationRunner(ABC):
 
         self.input_dir = input_dir
         self.output_dir = output_dir
-        ensure_dir_exist(self.input_dir)
-        ensure_dir_exist(self.output_dir)
+        ensure_dir_exist(Path(self.input_dir))
+        ensure_dir_exist(Path(self.output_dir))
 
         # Add the dg_multiplier
         self.ensemble_size = ensemble_size
@@ -61,7 +62,7 @@ class SimulationRunner(ABC):
                 f"Loading previous {self.__class__.__name__}. Any arguments will be overwritten..."
             )
         else:
-            self._sub_sim_runners: list[SimulationRunner] = []
+            self._sub_sim_runners: Sequence["SimulationRunner"] = []
             self._init_runtime_attributes()
             # Save state or not
             if save_state_on_init:
@@ -74,7 +75,7 @@ class SimulationRunner(ABC):
         for attribute, value in self.runtime_attributes.items():
             setattr(self, attribute, value)
 
-    def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
+    def run(self, *args, run_nos: Optional[list[int]] = None, **kwargs) -> None:
         """
         Run the simulation runner and any sub-simulation runners.
         Parameters

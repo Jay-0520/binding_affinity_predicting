@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -120,7 +120,36 @@ class EnergyMinimisationConfig(BaseModel):
         validate_assignment = True
 
 
-class FepSimulationConfig(BaseModel):
+class GromacsFepSimulationConfig(BaseModel):
+    lambda_values: dict[LegType, list[float]] = Field(
+        default_factory=lambda: {
+            LegType.BOUND: [
+                0.0,
+                0.1,
+                0.2,
+                0.3,
+                0.4,
+                0.5,
+                0.6,
+                0.7,
+                0.8,
+                0.9,
+                1.0,
+            ],
+            LegType.FREE: [
+                0.1,
+                0.2,
+                0.3,
+                0.4,
+                0.5,
+                0.6,
+                0.7,
+            ],
+        }
+    )
+
+
+class SomdFepSimulationConfig(BaseModel):
     """
     Configuration for the λ‐schedule used in bound and free legs.
     """
@@ -284,8 +313,10 @@ class BaseWorkflowConfig(BaseModel):
     param_ensemble_equilibration: EnsembleEquilibrationConfig = Field(
         default_factory=lambda: EnsembleEquilibrationConfig()  # type: ignore[call-arg]
     )
-    param_fep_params: FepSimulationConfig = Field(
-        default_factory=lambda: FepSimulationConfig()
+    param_fep_params: Union[
+        SomdFepSimulationConfig, GromacsFepSimulationConfig
+    ] = Field(
+        default_factory=lambda: GromacsFepSimulationConfig()
     )  # type: ignore[call-arg]
 
     append_to_ligand_selection: str = Field(

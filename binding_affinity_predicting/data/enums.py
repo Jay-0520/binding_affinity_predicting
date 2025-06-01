@@ -21,6 +21,12 @@ class JobStatus(int, Enum):
     KILLED = 4
 
 
+class GromacsLambdaMdpTemplate(str, Enum):
+    """Enumeration of the GROMACS mdp templates for different lambda states."""
+
+    TEMPLATE = "lambda.template.mdp"
+
+
 class SimulationRestraint(str, Enum):
     ALL = "all"
     BACKBONE = "backbone"
