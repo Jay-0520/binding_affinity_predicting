@@ -121,32 +121,200 @@ class EnergyMinimisationConfig(BaseModel):
 
 
 class GromacsFepSimulationConfig(BaseModel):
-    lambda_values: dict[LegType, list[float]] = Field(
+    """
+    For each leg (BOUND or FREE), specify three parallel lambda schedules:
+      - bonded-lambdas
+      - coul-lambdas
+      - vdw-lambdas
+
+    All three lists must be of identical length for any given LegType.
+    If your “FREE” (ligand) leg only needs Coulomb and vdw lambdas, you can still
+    supply a “dummy” bonded vector of the same length, for consistency.
+    """
+
+    bonded_lambdas: dict[LegType, list[float]] = Field(
         default_factory=lambda: {
             LegType.BOUND: [
                 0.0,
+                0.01,
+                0.025,
+                0.05,
+                0.075,
                 0.1,
                 0.2,
-                0.3,
-                0.4,
+                0.35,
                 0.5,
-                0.6,
-                0.7,
-                0.8,
-                0.9,
+                0.75,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+            ],
+            # “Ligand” (FREE) only needs coulomb and vdw, but we still give a dummy bonded
+            # schedule of the same length (20 entries here) so the validator passes.
+            LegType.FREE: [0.0] * 20,
+        }
+    )
+
+    coul_lambdas: dict[LegType, list[float]] = Field(
+        default_factory=lambda: {
+            LegType.BOUND: [
+                0.0,
+                0.00,
+                0.000,
+                0.00,
+                0.000,
+                0.0,
+                0.0,
+                0.00,
+                0.0,
+                0.00,
+                0.0,
+                0.25,
+                0.5,
+                0.75,
+                1.0,
+                1.00,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
                 1.0,
             ],
             LegType.FREE: [
+                0.0,
+                0.25,
+                0.5,
+                0.75,
+                1.0,
+                1.00,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+                1.00,
+                1.0,
+            ],
+        }
+    )
+
+    vdw_lambdas: dict[LegType, list[float]] = Field(
+        default_factory=lambda: {
+            LegType.BOUND: [
+                0.0,
+                0.00,
+                0.000,
+                0.00,
+                0.000,
+                0.0,
+                0.0,
+                0.00,
+                0.0,
+                0.00,
+                0.0,
+                0.00,
+                0.0,
+                0.00,
+                0.0,
+                0.05,
                 0.1,
                 0.2,
                 0.3,
                 0.4,
                 0.5,
                 0.6,
+                0.65,
                 0.7,
+                0.75,
+                0.8,
+                0.85,
+                0.9,
+                0.95,
+                1.0,
+            ],
+            LegType.FREE: [
+                0.0,
+                0.00,
+                0.0,
+                0.00,
+                0.0,
+                0.05,
+                0.1,
+                0.2,
+                0.3,
+                0.4,
+                0.5,
+                0.6,
+                0.65,
+                0.7,
+                0.75,
+                0.8,
+                0.85,
+                0.9,
+                0.95,
+                1.0,
             ],
         }
     )
+
+    @model_validator
+    def ensure_same_length(cls, values):
+        """
+        Ensure that, for each leg, bonded/coul/van‐der‐Waals lists all share the same length.
+        TODO: double check if this is always true for GROMACS
+        """
+        bonded = values.get("bonded_lambdas", {})
+        coul = values.get("coul_lambdas", {})
+        vdw = values.get("vdw_lambdas", {})
+
+        for leg in LegType:
+            b_list = bonded.get(leg)
+            c_list = coul.get(leg)
+            v_list = vdw.get(leg)
+
+            if b_list is None or c_list is None or v_list is None:
+                raise ValueError(f"Missing lambda schedule for leg {leg!r}")
+
+            if not (len(b_list) == len(c_list) == len(v_list)):
+                raise ValueError(
+                    f"All three lambda lists for {leg.name} must be the same length. "
+                    f"Found: bonded={len(b_list)}, coul={len(c_list)}, vdw={len(v_list)}"
+                )
+
+        return values
 
 
 class SomdFepSimulationConfig(BaseModel):
