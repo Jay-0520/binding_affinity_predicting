@@ -34,28 +34,26 @@ class LambdaWindow(SimulationRunner):
         self,
         lam_state: int,
         input_dir: str,
-        output_dir: str,
+        work_dir: str,
         sim_params: dict,
         ensemble_size: int = 5,
         virtual_queue: Optional[VirtualQueue] = None,
     ):
         super().__init__(
-            input_dir=input_dir, output_dir=output_dir, ensemble_size=ensemble_size
+            input_dir=input_dir, output_dir=work_dir, ensemble_size=ensemble_size
         )
         self.lam_state = lam_state
         self.virtual_queue = virtual_queue
         self.sim_params = sim_params
 
         # Initialize _sub_sim_runners as list of Simulation objects
-        self._sub_sim_runners: list[Simulation] = []
+        self._sub_sim_runners: list[Simulation] = []  # type: ignore
         for run_no in range(1, ensemble_size + 1):
-            run_name = f"run_{str(run_no).zfill(2)}"
-            sim_base_dir = f"{self.output_dir}/{run_name}"
 
             sim = Simulation(
                 lam_state=lam_state,
                 run_index=run_no,
-                work_dir=sim_base_dir,
+                work_dir=Path(work_dir),
                 **sim_params,
             )
             self._sub_sim_runners.append(sim)
@@ -95,14 +93,14 @@ class LambdaWindow(SimulationRunner):
         """
         Return a list of all child Simulation(...) runners that have failed.
         """
-        return [sim for sim in self.sims if getattr(sim, "failed", False)]
+        raise NotImplementedError()
 
     @property
     def running(self) -> bool:
         """
         True if any child Simulation(...) is still running.
         """
-        return any(getattr(sim, "running", False) for sim in self.sims)
+        return any(getattr(sim, "running", False) for sim in self._sub_sim_runners)
 
 
 class Leg(SimulationRunner):
@@ -129,7 +127,7 @@ class Leg(SimulationRunner):
         self.lam_indices = lam_indices
         self.ensemble_size = ensemble_size
         self.sim_config = sim_config
-        self._sub_sim_runners: Sequence[LambdaWindow] = []
+        self._sub_sim_runners: list[LambdaWindow] = []
 
     @property
     def failed_simulations(self):
@@ -257,6 +255,10 @@ class Leg(SimulationRunner):
         suffix = PreparationStage.EQUILIBRATED.file_suffix
         leg_base = Path(self.output_dir)
 
+        bonded_full = self.sim_config.bonded_lambdas[self.leg_type]  # list of floats
+        coul_full = self.sim_config.coul_lambdas[self.leg_type]
+        vdw_full = self.sim_config.vdw_lambdas[self.leg_type]
+
         for lam_idx in self.lam_indices:
             for run_idx in range(1, self.ensemble_size + 1):
                 run_dir = leg_base / f"lambda_{lam_idx}" / f"run_{run_idx}"
@@ -275,12 +277,15 @@ class Leg(SimulationRunner):
                         / f"{self.leg_type.name.lower()}{suffix}_{run_idx}_final.top"
                     ),
                     "extra_params": {"lambda_float": λ_float},
+                    "bonded_list": bonded_full,
+                    "coul_list": coul_full,
+                    "vdw_list": vdw_full,
                 }
 
                 window = LambdaWindow(
                     lam_state=lam_idx,
                     input_dir=self.input_dir,
-                    output_dir=str(run_dir),
+                    work_dir=str(run_dir),
                     sim_params=sim_params,
                     ensemble_size=self.ensemble_size,
                 )
@@ -319,28 +324,6 @@ class Leg(SimulationRunner):
             self._failed = False
             self._finished = True
 
-    def run(
-        self,
-        run_nos: Optional[list[int]] = None,
-        adaptive: bool = False,
-        runtime: Optional[float] = None,
-    ) -> None:
-        """
-        Run all lambda windows in this leg.
-
-        Parameters
-        ----------
-        run_nos : List[int] or None
-            If provided, only run the specified replica indices (1-based) per λ.
-        hpc : bool
-            If True, submit each run_{run_idx} folder’s `submit_gmx.sh` to SLURM
-            (via `sbatch`). Otherwise run locally via window.run().
-        """
-        run_nos = self._get_valid_run_nos(run_nos)
-
-        for window in self._sub_sim_runners:
-            window.run(run_nos=run_nos, adaptive=adaptive, runtime=runtime)
-
 
 class Calculation(SimulationRunner):
     """
@@ -350,7 +333,7 @@ class Calculation(SimulationRunner):
     """
 
     # Only these two legs for GROMACS
-    required_legs = [LegType.BOUND, LegType.FREE]
+    required_legs = [LegType.BOUND]  # , LegType.FREE]
     _sub_sim_runners: Sequence["Leg"]
 
     def __init__(
@@ -418,10 +401,23 @@ class Calculation(SimulationRunner):
         if not self.setup_complete:
             raise ValueError("Calculation has not been set up yet. Call setup() first.")
 
-        # If SLURM‐mode, build exactly one VirtualQueue for the entire calc:
-        # if use_slurm:
-        #     vq = VirtualQueue(log_dir=self.output_dir, stream_log_level=logging.INFO)
-        # else:
-        #     vq = None
+        run_nos = self._get_valid_run_nos(run_nos)
 
-        super().run(run_nos=run_nos, adaptive=adaptive, runtime=runtime)
+        logger.info(f"Starting ABFE calculation with {len(self.legs)} legs")
+
+        # Run each leg
+        for leg in self.legs:
+            logger.info(f"Running leg: {leg.leg_type.name}")
+            leg.run(run_nos=run_nos, adaptive=adaptive, runtime=runtime)
+
+        # Update overall status
+        if any(leg._failed for leg in self.legs):
+            self._failed = True
+            self._finished = False
+        else:
+            self._failed = False
+            self._finished = all(leg._finished for leg in self.legs)
+
+        logger.info(
+            f"ABFE calculation completed. Failed: {self._failed}, Finished: {self._finished}"
+        )
