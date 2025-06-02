@@ -22,8 +22,8 @@ if shutil.which("squeue") is None:
             cwd = job_command_list[i + 1]  # a/b/c/d
 
         # find the .sh script in the args
-        # this is for submitting all *.sh scripts in the folder, even though it seems there should be only
-        # one "run_somd.sh"
+        # this is for submitting all *.sh scripts in the folder, even though
+        # it seems there should be only one "run_somd.sh"
         script_idx = next(
             (j for j, tok in enumerate(job_command_list) if tok.endswith(".sh")), None
         )
