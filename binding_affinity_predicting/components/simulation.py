@@ -101,23 +101,25 @@ class Simulation:
         try:
             subprocess.run(grompp_cmd, cwd=self.work_dir, check=True)
         except subprocess.CalledProcessError as e:
-            logger.error(f"grompp failed for λ={self.lam} in {self.work_dir}: {e}")
+            logger.error(
+                f"grompp failed for λ={self.lam_state} in {self.work_dir}: {e}"
+            )
             self.failed = True
             return
 
         # 2. gmx mdrun
-        logger.info(f"Running mdrun for lambda {self.lam} in {self.work_dir}")
+        logger.info(f"Running mdrun for lambda {self.lam_state} in {self.work_dir}")
         mdrun_cmd = [
             self.gmx_exe,
             "mdrun",
             "-deffnm",
-            f"lambda_{self.lam:.2f}_run{self.run_index}",
+            f"lambda_{self.lam_state:.2f}_run{self.run_index}",
         ]
         try:
             subprocess.run(mdrun_cmd, cwd=self.work_dir, check=True)
             self.finished = True
         except subprocess.CalledProcessError as e:
-            logger.error(f"mdrun failed for λ={self.lam} in {self.work_dir}: {e}")
+            logger.error(f"mdrun failed for λ={self.lam_state} in {self.work_dir}: {e}")
             self.failed = True
 
     @property

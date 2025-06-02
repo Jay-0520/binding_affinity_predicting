@@ -75,7 +75,7 @@ class SimulationRunner(ABC):
         for attribute, value in self.runtime_attributes.items():
             setattr(self, attribute, value)
 
-    def run(self, *args, run_nos: Optional[list[int]] = None, **kwargs) -> None:
+    def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
         """
         Run the simulation runner and any sub-simulation runners.
         Parameters

@@ -166,10 +166,8 @@ class GromacsFepSimulationConfig(BaseModel):
                 1.00,
                 1.0,
             ],
-            # “Ligand” (FREE) only needs coulomb and vdw, but we still give a dummy bonded
-            # schedule of the same length (20 entries here) so the validator passes.
-            LegType.FREE: [0.0] * 20,
-        }
+        },
+        description="Only LegType.BOUND is allowed here; FREE is omitted entirely.",
     )
 
     coul_lambdas: dict[LegType, list[float]] = Field(
@@ -290,31 +288,51 @@ class GromacsFepSimulationConfig(BaseModel):
         }
     )
 
-    @model_validator
-    def ensure_same_length(cls, values):
+    @model_validator(mode="after")
+    def ensure_same_length(cls, model):
         """
-        Ensure that, for each leg, bonded/coul/van‐der‐Waals lists all share the same length.
+        Enforce:
+         - BOUND must have bonded, coul, vdw all present & same length.
+         - FREE    must have coul, vdw present & same length; bonded may be missing.
+
         TODO: double check if this is always true for GROMACS
         """
-        bonded = values.get("bonded_lambdas", {})
-        coul = values.get("coul_lambdas", {})
-        vdw = values.get("vdw_lambdas", {})
+        bonded = model.bonded_lambdas
+        coul   = model.coul_lambdas
+        vdw    = model.vdw_lambdas
 
-        for leg in LegType:
-            b_list = bonded.get(leg)
-            c_list = coul.get(leg)
-            v_list = vdw.get(leg)
+        # 1) Ensure exactly one key in bonded_lambdas and it is BOUND
+        if set(bonded.keys()) != {LegType.BOUND}:
+            raise ValueError("`bonded_lambdas` must contain exactly LegType.BOUND.")
 
-            if b_list is None or c_list is None or v_list is None:
-                raise ValueError(f"Missing lambda schedule for leg {leg!r}")
+        # 2) Make sure that coul_lambdas and vdw_lambdas both have exactly two keys: BOUND and FREE
+        missing = {LegType.BOUND, LegType.FREE} - set(coul.keys())
+        if missing:
+            raise ValueError(f"`coul_lambdas` is missing: {missing}")
+        missing = {LegType.BOUND, LegType.FREE} - set(vdw.keys())
+        if missing:
+            raise ValueError(f"`vdw_lambdas` is missing: {missing}")
 
-            if not (len(b_list) == len(c_list) == len(v_list)):
-                raise ValueError(
-                    f"All three lambda lists for {leg.name} must be the same length. "
-                    f"Found: bonded={len(b_list)}, coul={len(c_list)}, vdw={len(v_list)}"
-                )
+        # 3) Validate that lengths match among the three lists for BOUND
+        bound_bonded = bonded[LegType.BOUND]
+        bound_coul = coul[LegType.BOUND]
+        bound_vdw = vdw[LegType.BOUND]
+        if not (len(bound_bonded) == len(bound_coul) == len(bound_vdw)):
+            raise ValueError(
+                f"BOUND: `bonded`, `coul`, and `vdw` lists must be the same length; "
+                f"got {len(bound_bonded)}/{len(bound_coul)}/{len(bound_vdw)}."
+            )
 
-        return values
+        # 4) Validate that FREE has only coul & vdw, and their lengths match
+        free_coul = coul[LegType.FREE]
+        free_vdw = vdw[LegType.FREE]
+        if len(free_coul) != len(free_vdw):
+            raise ValueError(
+                f"FREE: `coul_lambdas` and `vdw_lambdas` must be same length; "
+                f"got {len(free_coul)}/{len(free_vdw)}."
+            )
+
+        return model
 
 
 class SomdFepSimulationConfig(BaseModel):
