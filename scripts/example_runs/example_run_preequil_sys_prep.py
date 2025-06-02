@@ -10,7 +10,7 @@ from binding_affinity_predicting.data.schemas import (
     SimulationRestraint,
 )
 from binding_affinity_predicting.workflows.free_energy_calc.system_prep_workflow import (
-    run_complete_system_setup_bound_and_free,
+    _prepare_equilibrated_molecular_systems,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ input_dir = "/Users/jingjinghuang/Documents/fep_workflow/debug/inputs/in_files"
 output_dir = "/Users/jingjinghuang/Documents/fep_workflow/debug/inputs/tmp_output"
 os.makedirs(output_dir, exist_ok=True)
 
-system = run_complete_system_setup_bound_and_free(
+system = _prepare_equilibrated_molecular_systems(
     config=cfg,
     filename_stem="bound",
     protein_path=os.path.join(input_dir, "protein.pdb"),
