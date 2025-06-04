@@ -12,16 +12,18 @@ sub‐runner and drives GROMACS with a different `init‐lambda‐state`.
 import logging
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Optional, Sequence
+from time import sleep
 
 from binding_affinity_predicting.components.simulation import Simulation
 from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.data.enums import LegType, PreparationStage
+from binding_affinity_predicting.data.enums import LegType, PreparationStage, JobStatus
 from binding_affinity_predicting.data.schemas import (
     GromacsFepSimulationConfig,
 )
-from binding_affinity_predicting.hpc_cluster.virtual_queue import VirtualQueue
+from binding_affinity_predicting.hpc_cluster.virtual_queue import VirtualQueue, Job
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -61,10 +63,18 @@ class LambdaWindow(SimulationRunner):
     def setup(self) -> None:
         super().setup()
 
-    def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
+    def run(self, run_nos: Optional[list[int]] = None, runtime: Optional[float] = None, 
+            use_hpc: bool = True, *args, **kwargs) -> None:
         """Run simulations for specified run numbers"""
         run_nos = self._get_valid_run_nos(run_nos)
 
+        if use_hpc and self.virtual_queue is not None:
+            self._run_hpc(run_nos, runtime)
+        else:
+            self._run_local(run_nos, runtime)
+
+    def _run_local(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
+        """Run simulations locally (blocking)"""
         # Run only the specified simulations
         for run_no in run_nos:
             if run_no < 1 or run_no > self.ensemble_size:
@@ -72,35 +82,121 @@ class LambdaWindow(SimulationRunner):
                     f"Invalid run number {run_no}. Must be in [1..{self.ensemble_size}]."
                 )
             sim_index = run_no - 1
-            self._sub_sim_runners[sim_index].run()
+            if runtime is not None:
+                # Pass runtime to simulation if provided
+                self._sub_sim_runners[sim_index].run(runtime=runtime)
+            else:
+                self._sub_sim_runners[sim_index].run()
 
         # Update status based on simulation results
         self._update_status()
 
-    def _update_status(self):
-        """Update _failed and _finished status based on sub-simulations"""
-        if any(getattr(sim, "failed", False) for sim in self._sub_sim_runners):
-            self._failed = True
-            self._finished = False
-        else:
-            self._failed = False
-            self._finished = all(
-                getattr(sim, "finished", False) for sim in self._sub_sim_runners
+    def _run_hpc(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
+        """Submit simulations to SLURM via VirtualQueue (non-blocking)"""
+        self._running = True
+        self._submitted_jobs: list[Job] = []
+
+        for run_no in run_nos:
+            if run_no < 1 or run_no > self.ensemble_size:
+                raise ValueError(
+                    f"Invalid run number {run_no}. Must be in [1..{self.ensemble_size}]."
+                )
+            
+            # Build SLURM submission command
+            run_dir = Path(self.output_dir) / f"run_{run_no}"
+            submit_script = run_dir / "submit_gmx.sh"
+            
+            # Prepare the command list for sbatch
+            command_list = [str(submit_script)]
+            if runtime is not None:
+                command_list.extend(["--runtime", str(runtime)])
+            
+            # Set up SLURM output file base
+            slurm_file_base = str(run_dir / f"slurm_lambda_{self.lam_state}_run_{run_no}")
+            
+            # Submit to virtual queue
+            job = self.virtual_queue.submit(
+                command_list=command_list,
+                slurm_file_base=slurm_file_base
             )
+            self._submitted_jobs.append(job)
+            
+            logger.info(f"Submitted lambda {self.lam_state}, run {run_no} to SLURM (job ID: {job.virtual_job_id})")
+
+    def kill(self) -> None:
+        """Kill all running simulations"""
+        if self.virtual_queue and self._submitted_jobs:
+            for job in self._submitted_jobs:
+                if job.status in [JobStatus.QUEUED, JobStatus.RUNNING]:
+                    self.virtual_queue.kill(job)
+                    logger.info(f"Killed job {job.virtual_job_id}")
+        
+        # Also kill local simulations if any
+        for sim in self._sub_sim_runners:
+            if hasattr(sim, 'kill'):
+                sim.kill()
+        
+        self._running = False
+
+    def _update_status(self):
+        """
+        Update _failed, _finished and _running status based on sub-simulations or SLURM jobs
+
+        This is to check if for a given LambdaWindow (which contains multiple replicas), 
+        its replicas have all finished or not.
+        """
+        if self.virtual_queue and self._submitted_jobs:
+            # --- HPC/SLURM branch ---
+            finished_jobs = 0
+            failed_jobs = 0
+            
+            for job in self._submitted_jobs:
+                if job.status == JobStatus.FINISHED:
+                    finished_jobs += 1
+                elif job.status == JobStatus.FAILED:
+                    failed_jobs += 1
+            # if any SLURM job has failed, this window is “failed”
+            if failed_jobs > 0:
+                self._failed = True
+                self._finished = False
+                self._running = False
+            # If every single SLURM job is marked FINISHED, window is done
+            elif finished_jobs == len(self._submitted_jobs):
+                self._failed = False
+                self._finished = True
+                self._running = False
+            else:
+                # Otherwise, at least one job is still pending/running
+                self._running = True
+        else:
+            # --- Local branch: look at each SimulationRunner’s flags ---
+            if any(getattr(sim, "failed", False) for sim in self._sub_sim_runners):
+                self._failed = True
+                self._finished = False
+            else:
+                self._failed = False
+                self._finished = all(
+                    getattr(sim, "finished", False) for sim in self._sub_sim_runners
+                )
 
     @property
     def failed_simulations(self) -> list[SimulationRunner]:
         """
         Return a list of all child Simulation(...) runners that have failed.
         """
-        raise NotImplementedError()
+        return [sim for sim in self._sub_sim_runners if getattr(sim, "failed", False)]
 
     @property
     def running(self) -> bool:
         """
         True if any child Simulation(...) is still running.
         """
-        return any(getattr(sim, "running", False) for sim in self._sub_sim_runners)
+        if self.virtual_queue and self._submitted_jobs:
+            # Update status first
+            self._update_status()
+            return self._running
+        else:
+            return any(getattr(sim, "running", False) for sim in self._sub_sim_runners)
 
 
 class Leg(SimulationRunner):
@@ -119,6 +215,7 @@ class Leg(SimulationRunner):
         input_dir: str,
         output_dir: str,
         sim_config: GromacsFepSimulationConfig,
+        virtual_queue: Optional[VirtualQueue] = None,
     ):
         super().__init__(
             input_dir=input_dir, output_dir=output_dir, ensemble_size=ensemble_size
@@ -127,7 +224,10 @@ class Leg(SimulationRunner):
         self.lam_indices = lam_indices
         self.ensemble_size = ensemble_size
         self.sim_config = sim_config
+        self.virtual_queue = virtual_queue
         self._sub_sim_runners: list[LambdaWindow] = []
+        self._running = False
+        self.running_wins = []  # Track currently running windows
 
     @property
     def failed_simulations(self):
@@ -288,6 +388,7 @@ class Leg(SimulationRunner):
                     work_dir=str(run_dir),
                     sim_params=sim_params,
                     ensemble_size=self.ensemble_size,
+                    virtual_queue=self.virtual_queue,
                 )
                 self._sub_sim_runners.append(window)
                 window.setup()
@@ -297,6 +398,7 @@ class Leg(SimulationRunner):
         run_nos: Optional[list[int]] = None,
         adaptive: bool = False,
         runtime: Optional[float] = None,
+        use_hpc: bool = True,
     ) -> None:
         """
         Run all λ-windows in this Leg.
@@ -309,12 +411,21 @@ class Leg(SimulationRunner):
             Ignored here (passed down to LambdaWindow if needed).
         runtime : float or None
             If adaptive=False, must provide `runtime` (ns).
+        hpc : bool
+            If True, submit to SLURM via VirtualQueue (non-blocking).
+            If False, run locally (blocking).
         """
         run_nos = self._get_valid_run_nos(run_nos)
 
+        if use_hpc:
+            self._run_hpc(run_nos, runtime)
+        else:
+            self._run_local(run_nos, runtime)
+
+    def _run_local(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
+        """Run all lambda windows locally (blocking)"""
         for window in self._sub_sim_runners:
-            # Pass run_nos & runtime into each LambdaWindow
-            window.run(run_nos=run_nos, runtime=runtime or 0.0)
+            window.run(run_nos=run_nos, runtime=runtime, use_hpc=False)
 
         self._running = True
         if any(win._failed for win in self._sub_sim_runners):
@@ -323,6 +434,71 @@ class Leg(SimulationRunner):
         else:
             self._failed = False
             self._finished = True
+
+    def _run_hpc(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
+        """Submit all lambda windows to SLURM (non-blocking)"""
+        self._running = True
+        self.running_wins = []
+
+        for window in self._sub_sim_runners:
+            window.run(run_nos=run_nos, runtime=runtime, use_hpc=True)
+            self.running_wins.append(window)
+
+        logger.info(f"Submitted {len(self.running_wins)} lambda windows to SLURM for leg {self.leg_type.name}")
+
+    def kill(self) -> None:
+        """Kill all running lambda windows"""
+        for window in self._sub_sim_runners:
+            window.kill()
+        self._running = False
+        self.running_wins = []
+
+    @property
+    def running(self) -> bool:
+        """True if any lambda window is still running"""
+        if self.virtual_queue and self.running_wins:
+            # Update running_wins list by removing finished windows
+            still_running = []
+            for win in self.running_wins:
+                if win.running:
+                    still_running.append(win)
+            self.running_wins = still_running
+            return len(self.running_wins) > 0
+        else:
+            return any(win.running for win in self._sub_sim_runners)
+
+    def wait(self, cycle_pause: int = 60) -> None:
+        """Wait for all lambda windows to finish (for HPC runs)"""
+        if not self.virtual_queue:
+            return  # Nothing to wait for in local mode
+
+        while self.running:
+            sleep(cycle_pause)
+            # Update virtual queue
+            self.virtual_queue.update()
+            
+            # Update status
+            finished_wins = []
+            for win in self.running_wins:
+                win._update_status()
+                if not win.running:
+                    finished_wins.append(win)
+                    logger.info(f"Lambda window {win.lam_state} finished")
+
+            # Remove finished windows
+            for win in finished_wins:
+                self.running_wins.remove(win)
+
+        # Update final status
+        if any(win._failed for win in self._sub_sim_runners):
+            self._failed = True
+            self._finished = False
+        else:
+            self._failed = False
+            self._finished = True
+        
+        self._running = False
+        logger.info(f"All lambda windows in leg {self.leg_type.name} completed")
 
 
 class Calculation(SimulationRunner):
@@ -344,11 +520,25 @@ class Calculation(SimulationRunner):
         equil_detection: str = "multiwindow",
         runtime_constant: Optional[float] = 0.001,
         ensemble_size: int = 5,
+        virtual_queue: Optional[VirtualQueue] = None,
     ) -> None:
         super().__init__(
             input_dir=input_dir, output_dir=output_dir, ensemble_size=ensemble_size
         )
         self.sim_config = sim_config
+        self.equil_detection = equil_detection
+        self.runtime_constant = runtime_constant
+        self._running = False
+        self.run_thread = None
+        self.kill_thread = False
+
+        # Set up virtual queue if not provided
+        if virtual_queue is None:
+            self.virtual_queue = VirtualQueue(
+                log_dir=output_dir, 
+            )
+        else:
+            self.virtual_queue = virtual_queue
 
     def setup(self) -> None:
         if getattr(self, "setup_complete", False):
@@ -371,6 +561,7 @@ class Calculation(SimulationRunner):
                 output_dir=str(leg_base),
                 ensemble_size=self.ensemble_size,
                 sim_config=self.sim_config,
+                virtual_queue=self.virtual_queue,
             )
             leg.setup()
             self.legs.append(leg)
@@ -383,6 +574,7 @@ class Calculation(SimulationRunner):
         run_nos: Optional[list[int]] = None,
         adaptive: bool = False,
         runtime: Optional[float] = None,
+        use_hpc: bool = True,
     ) -> None:
         """
         Run the entire ABFE calculation, either locally or via SLURM.
@@ -403,12 +595,28 @@ class Calculation(SimulationRunner):
 
         run_nos = self._get_valid_run_nos(run_nos)
 
-        logger.info(f"Starting ABFE calculation with {len(self.legs)} legs")
+
+        if use_hpc:
+            # Run in background thread for HPC mode
+            self.run_thread = threading.Thread(
+                target=self._run_hpc_threaded,
+                args=(run_nos, adaptive, runtime),
+                name="ABFE_Calculation"
+            )
+            self.run_thread.start()
+        else:
+            # Run locally (blocking)
+            self._run_local(run_nos, adaptive, runtime)
+        
+
+    def _run_local(self, run_nos: list[int], adaptive: bool, runtime: Optional[float]) -> None:
+        """Run the calculation locally (blocking)"""
+        logger.info(f"Starting ABFE calculation locally with {len(self.legs)} legs")
 
         # Run each leg
         for leg in self.legs:
             logger.info(f"Running leg: {leg.leg_type.name}")
-            leg.run(run_nos=run_nos, adaptive=adaptive, runtime=runtime)
+            leg.run(run_nos=run_nos, adaptive=adaptive, runtime=runtime, use_hpc=False)
 
         # Update overall status
         if any(leg._failed for leg in self.legs):
@@ -421,3 +629,91 @@ class Calculation(SimulationRunner):
         logger.info(
             f"ABFE calculation completed. Failed: {self._failed}, Finished: {self._finished}"
         )
+
+    def _run_hpc_threaded(self, run_nos: list[int], adaptive: bool, runtime: Optional[float]) -> None:
+        """Run the calculation via SLURM in a background thread"""
+        try:
+            self.kill_thread = False
+            self._running = True
+            
+            logger.info(f"Starting ABFE calculation via SLURM with {len(self.legs)} legs")
+
+            # Submit all legs to SLURM
+            for leg in self.legs:
+                if self.kill_thread:
+                    logger.info("Kill thread requested: stopping calculation")
+                    return
+                    
+                logger.info(f"Submitting leg: {leg.leg_type.name}")
+                leg.run(run_nos=run_nos, adaptive=adaptive, runtime=runtime, use_hpc=True)
+
+            # Wait for all legs to complete
+            self._wait_for_completion()
+
+        except Exception as e:
+            logger.exception(f"Error in ABFE calculation: {e}")
+            self._failed = True
+        finally:
+            self._running = False
+
+    def _wait_for_completion(self, cycle_pause: int = 60) -> None:
+        """Wait for all legs to complete"""
+        while any(leg.running for leg in self.legs):
+            if self.kill_thread:
+                logger.info("Kill thread requested: stopping wait")
+                return
+                
+            sleep(cycle_pause)
+            
+            # Update virtual queue
+            self.virtual_queue.update()
+            
+            # Check leg status
+            for leg in self.legs:
+                if not leg.running and leg in self.legs:
+                    status = "FAILED" if leg._failed else "FINISHED"
+                    logger.info(f"Leg {leg.leg_type.name} {status}")
+
+        # Update overall status
+        if any(leg._failed for leg in self.legs):
+            self._failed = True
+            self._finished = False
+        else:
+            self._failed = False
+            self._finished = all(leg._finished for leg in self.legs)
+
+        logger.info(
+            f"ABFE calculation completed. Failed: {self._failed}, Finished: {self._finished}"
+        )
+
+    def kill(self) -> None:
+        """Kill all running simulations"""
+        logger.info("Killing ABFE calculation...")
+        self.kill_thread = True
+        
+        for leg in self.legs:
+            leg.kill()
+        
+        if self.virtual_queue:
+            # Kill all remaining jobs in the virtual queue
+            for job in self.virtual_queue.queue:
+                if job.status in [JobStatus.QUEUED, JobStatus.RUNNING]:
+                    self.virtual_queue.kill(job)
+        
+        self._running = False
+        logger.info("ABFE calculation killed")
+
+    def wait(self) -> None:
+        """Wait for the calculation to complete (for HPC runs)"""
+        if self.run_thread and self.run_thread.is_alive():
+            self.run_thread.join()
+        elif self.virtual_queue:
+            # If running without threading, wait for virtual queue
+            self.virtual_queue.wait()
+
+    @property
+    def running(self) -> bool:
+        """True if the calculation is currently running"""
+        if self.run_thread and self.run_thread.is_alive():
+            return True
+        return self._running or any(leg.running for leg in getattr(self, 'legs', []))

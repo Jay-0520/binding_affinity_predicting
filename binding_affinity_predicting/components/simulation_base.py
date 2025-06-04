@@ -50,38 +50,37 @@ class SimulationRunner(ABC):
 
         self.input_dir = input_dir
         self.output_dir = output_dir
+        self.ensemble_size = ensemble_size
+
+        # Initialize sub-runners and runtime flags
+        self._sub_sim_runners: list[SimulationRunner] = []
+        self._init_runtime_attributes()
+
         ensure_dir_exist(Path(self.input_dir))
         ensure_dir_exist(Path(self.output_dir))
 
-        # Add the dg_multiplier
-        self.ensemble_size = ensemble_size
-
-        # Check if we are starting from a previous simulation runner
-        if os.path.exists(f"{self.input_dir}/{self.__class__.__name__}.pkl"):
-            logger.info(
-                f"Loading previous {self.__class__.__name__}. Any arguments will be overwritten..."
-            )
-        else:
-            self._sub_sim_runners: Sequence["SimulationRunner"] = []
-            self._init_runtime_attributes()
-            # Save state or not
-            if save_state_on_init:
-                logger.info(
-                    f"Saving {self.__class__.__name__} state "
-                    f"to {self.input_dir}/{self.__class__.__name__}.pkl"
-                )
+        
+        # (Optional) save initial state if needed
+        if save_state_on_init:
+            logger.info(f"Saving {self.__class__.__name__} state to "
+                        f"{self.input_dir}/{self.__class__.__name__}.pkl")
+            # self._dump()  # implement pickling if needed
 
     def _init_runtime_attributes(self) -> None:
+        # Reset any runtime flags defined in subclasses
         for attribute, value in self.runtime_attributes.items():
             setattr(self, attribute, value)
 
+    def setup(self) -> None:
+        """Recursively set up all sub-runners."""
+        logger.info(f"Setting up {self.__class__.__name__}...")
+        for sub_sim_runner in self._sub_sim_runners:
+            sub_sim_runner.setup()
+
     def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
         """
-        Run the simulation runner and any sub-simulation runners.
-        Parameters
-        ----------
-        run_nos : List[int], Optional, default=None
-            A list of the run numbers to run. If None, all runs are run.
+        Recursively run all sub-runners. Subclasses can override to insert custom logic
+        before/after sub-runners are launched.
         """
         run_nos = self._get_valid_run_nos(run_nos)
 
@@ -89,28 +88,56 @@ class SimulationRunner(ABC):
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.run(run_nos=run_nos, *args, **kwargs)
 
-    def setup(self) -> None:
-        """Set up the {self.__class__.__name__} and all sub-simulation runners."""
-        logger.info(f"Setting up {self.__class__.__name__}...")
-        for sub_sim_runner in self._sub_sim_runners:
-            sub_sim_runner.setup()
-
     def kill(self) -> None:
-        """Kill all sub-simulation runners."""
+        """Recursively kill all sub-runners."""
         logger.info(f"Killing {self.__class__.__name__}...")
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.kill()
 
+        self._running = False
+
     def wait(self) -> None:
-        """Wait for the {self.__class__.__name__} to finish running."""
-        # Give the simulation runner a chance to start
+        """
+        Generic “wait until everyone is done.” Subclasses can override if they have
+        more sophisticated polling (e.g. HPC).
+        """
+        # Give the simulation runner a moment to start
         sleep(30)
         while self.running:
-            sleep(30)  # Check every 30 seconds
+            sleep(30)
 
     @property
     def running(self) -> bool:
-        return any(sub.running for sub in self._sub_sim_runners)
+        """
+        A runner is considered “running” if any of its sub-runners is running.
+        Subclasses can override if they maintain their own `_running` flag.
+        """
+        return any(getattr(sub, "_running", False) for sub in self._sub_sim_runners)
+
+    @property
+    def finished(self) -> bool:
+        """True if all sub-runners are marked “finished” and none failed."""
+        return all(getattr(sub, "_finished", False) for sub in self._sub_sim_runners) and not self.failed
+
+    @property
+    def failed(self) -> bool:
+        """True if any sub-runner has `_failed == True`."""
+        return any(getattr(sub, "_failed", False) for sub in self._sub_sim_runners)
+
+
+    @property
+    def failed_simulations(self) -> list["SimulationRunner"]:
+        """
+        Return a flat list of any descendant sub-runners whose `.failed == True`.
+        """
+        result = []
+        for sub in self._sub_sim_runners:
+            if getattr(sub, "_failed", False):
+                result.append(sub)
+            # Recurse into grandchildren
+            result.extend(sub.failed_simulations)
+        return result
+    
 
     def get_tot_simulation_time(self, run_nos: Optional[list[int]] = None) -> float:
         """
