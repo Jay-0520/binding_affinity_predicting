@@ -426,7 +426,7 @@ class Calculation(SimulationRunner):
         # Set up all legs
         super().setup()
         self.setup_complete = True
-        self._dump()
+        # self._dump()
 
     def run(
         self,
