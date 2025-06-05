@@ -48,16 +48,41 @@ class LambdaWindow(SimulationRunner):
 
         # Initialize _sub_sim_runners as list of Simulation objects
         self._sub_sim_runners: list[Simulation] = []  # type: ignore
-        for run_no in range(1, ensemble_size + 1):
+
+    def setup(self) -> None:
+        """Set up simulation objects for each run in this lambda window"""
+        # Initialize _sub_sim_runners as list of Simulation objects
+        self._sub_sim_runners.clear()  # Clear any existing simulations
+
+        for run_no in range(1, self.ensemble_size + 1):
+            # Each simulation should run in its own run_X directory
+            individual_run_dir = Path(self.output_dir) / f"run_{run_no}"
+
+            # Create run-specific sim_params by formatting templates
+            run_specific_params = self.sim_params.copy()
+            if "gro_file_template" in self.sim_params:
+                run_specific_params["gro_file"] = str(
+                    individual_run_dir
+                    / self.sim_params["gro_file_template"].format(run_idx=run_no)
+                )
+                del run_specific_params["gro_file_template"]
+
+            if "top_file_template" in self.sim_params:
+                run_specific_params["top_file"] = str(
+                    individual_run_dir
+                    / self.sim_params["top_file_template"].format(run_idx=run_no)
+                )
+                del run_specific_params["top_file_template"]
+
             sim = Simulation(
-                lam_state=lam_state,
+                lam_state=self.lam_state,
                 run_index=run_no,
-                work_dir=Path(work_dir),
-                **sim_params,
+                work_dir=individual_run_dir,  # Use individual run directory
+                **run_specific_params,
             )
             self._sub_sim_runners.append(sim)
 
-    def setup(self) -> None:
+        # Call parent setup after creating simulation objects
         super().setup()
 
     def run(
@@ -286,39 +311,38 @@ class Leg(SimulationRunner):
         if not master_template.exists():
             raise FileNotFoundError(f"MDP template not found at {master_template}")
 
+        # Create ONE LambdaWindow per lambda index (not per run)
         for lam_idx in self.lam_indices:
-            for run_idx in range(1, self.ensemble_size + 1):
-                run_dir = leg_base / f"lambda_{lam_idx}" / f"run_{run_idx}"
-                # TODO: temporary value for testing the code
-                λ_float = self.sim_config.coul_lambdas[self.leg_type][lam_idx]
+            lam_dir = leg_base / f"lambda_{lam_idx}"
 
-                sim_params = {
-                    "gmx_exe": "gmx",
-                    "mdp_template": str(master_template),
-                    "gro_file": str(
-                        run_dir
-                        / f"{self.leg_type.name.lower()}{suffix}_{run_idx}_final.gro"
-                    ),
-                    "top_file": str(
-                        run_dir
-                        / f"{self.leg_type.name.lower()}{suffix}_{run_idx}_final.top"
-                    ),
-                    "extra_params": {"lambda_float": λ_float},
-                    "bonded_list": bonded_full,
-                    "coul_list": coul_full,
-                    "vdw_list": vdw_full,
-                }
+            # TODO: temporary value for testing the code
+            λ_float = self.sim_config.coul_lambdas[self.leg_type][lam_idx]
 
-                window = LambdaWindow(
-                    lam_state=lam_idx,
-                    input_dir=self.input_dir,
-                    work_dir=str(run_dir),
-                    sim_params=sim_params,
-                    ensemble_size=self.ensemble_size,
-                    virtual_queue=self.virtual_queue,
-                )
-                self._sub_sim_runners.append(window)
-                window.setup()
+            # Pass file name templates that LambdaWindow can use to construct
+            # run-specific paths
+            sim_params = {
+                "gmx_exe": "gmx",
+                "mdp_template": str(master_template),
+                "gro_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.gro",
+                "top_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.top",
+                "extra_params": {"lambda_float": λ_float},
+                "bonded_list": bonded_full,
+                "coul_list": coul_full,
+                "vdw_list": vdw_full,
+            }
+
+            window = LambdaWindow(
+                lam_state=lam_idx,
+                input_dir=self.input_dir,
+                work_dir=str(
+                    lam_dir
+                ),  # Pass the lambda directory, not individual run dirs
+                sim_params=sim_params,
+                ensemble_size=self.ensemble_size,
+                virtual_queue=self.virtual_queue,
+            )
+            self._sub_sim_runners.append(window)
+            window.setup()
 
     def run(
         self,
