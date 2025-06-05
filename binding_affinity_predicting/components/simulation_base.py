@@ -1,15 +1,16 @@
 import logging
-import os
 import pathlib
 from abc import ABC
 from itertools import count
 from pathlib import Path
 from time import sleep
-from typing import Optional, Sequence
+from typing import Optional
 
 from binding_affinity_predicting.components.utils import (
     ensure_dir_exist,
 )
+from binding_affinity_predicting.data.enums import JobStatus
+from binding_affinity_predicting.hpc_cluster.virtual_queue import Job, VirtualQueue
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -35,7 +36,7 @@ class SimulationRunner(ABC):
     # Create a dict of attributes which can be modified by algorithms when
     # running the simulation, but which should be reset if the user wants to
     # re-run. This takes the form {attribute_name: reset_value}
-    runtime_attributes: dict = {}
+    runtime_attributes: dict = {"_finished": False, "_failed": False, "_running": False}
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class SimulationRunner(ABC):
         output_dir: str,
         ensemble_size: int = 5,
         save_state_on_init: bool = True,
+        virtual_queue: Optional[VirtualQueue] = None,
     ) -> None:
         # Set up the directories (which may be overwritten if the
         # simulation runner is subsequently loaded from a pickle file)
@@ -51,19 +53,22 @@ class SimulationRunner(ABC):
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.ensemble_size = ensemble_size
+        self.virtual_queue = virtual_queue
 
         # Initialize sub-runners and runtime flags
         self._sub_sim_runners: list[SimulationRunner] = []
+        self._submitted_jobs: list[Job] = []  # For HPC jobs
         self._init_runtime_attributes()
 
         ensure_dir_exist(Path(self.input_dir))
         ensure_dir_exist(Path(self.output_dir))
 
-        
         # (Optional) save initial state if needed
         if save_state_on_init:
-            logger.info(f"Saving {self.__class__.__name__} state to "
-                        f"{self.input_dir}/{self.__class__.__name__}.pkl")
+            logger.info(
+                f"Saving {self.__class__.__name__} state to "
+                f"{self.input_dir}/{self.__class__.__name__}.pkl"
+            )
             # self._dump()  # implement pickling if needed
 
     def _init_runtime_attributes(self) -> None:
@@ -86,44 +91,140 @@ class SimulationRunner(ABC):
 
         logger.info(f"Running run numbers {run_nos} for {self.__class__.__name__}...")
         for sub_sim_runner in self._sub_sim_runners:
-            sub_sim_runner.run(run_nos=run_nos, *args, **kwargs)
+            sub_sim_runner.run(run_nos, *args, **kwargs)
 
     def kill(self) -> None:
-        """Recursively kill all sub-runners."""
+        """Kill all running simulations and jobs."""
         logger.info(f"Killing {self.__class__.__name__}...")
+
+        # Kill HPC jobs if any
+        if self.virtual_queue and self._submitted_jobs:
+            for job in self._submitted_jobs:
+                if job.status in [JobStatus.QUEUED, JobStatus.RUNNING]:
+                    self.virtual_queue.kill(job)
+                    logger.info(f"Killed job {job.virtual_job_id}")
+
+        # Recursively kill all sub-runners
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.kill()
 
         self._running = False
 
-    def wait(self) -> None:
+    def wait(self, cycle_pause: int = 60) -> None:
         """
-        Generic “wait until everyone is done.” Subclasses can override if they have
-        more sophisticated polling (e.g. HPC).
+        Wait for all simulations to complete. For HPC runs, periodically check status.
         """
-        # Give the simulation runner a moment to start
-        sleep(30)
-        while self.running:
+        if not self.virtual_queue:
+            # Local mode - simple wait
             sleep(30)
+            while self.running:
+                sleep(30)
+        else:
+            # HPC mode - update virtual queue and check status
+            while self.running:
+                sleep(cycle_pause)
+                self.virtual_queue.update()
+                self._update_status()
+
+    def _update_status(self):
+        """
+        Update _failed, _finished and _running status based on sub-simulations or jobs.
+        This method should be overridden by subclasses for specific logic.
+        """
+        if self.virtual_queue and self._submitted_jobs:
+            # --- HPC/SLURM branch ---
+            finished_jobs = sum(
+                1 for job in self._submitted_jobs if job.status == JobStatus.FINISHED
+            )
+            failed_jobs = sum(
+                1 for job in self._submitted_jobs if job.status == JobStatus.FAILED
+            )
+
+            # If any SLURM job has failed, this window is “failed”
+            if failed_jobs > 0:
+                self._failed = True
+                self._finished = False
+                self._running = False
+            # If every single SLURM job is marked FINISHED, window is done
+            elif finished_jobs == len(self._submitted_jobs):
+                self._failed = False
+                self._finished = True
+                self._running = False
+            else:
+                # Otherwise, at least one job is still pending/running
+                self._running = True
+        else:
+            # --- Local branch: look at each SimulationRunner’s flags ---
+            if self._sub_sim_runners:
+                if any(getattr(sub, "_failed", False) for sub in self._sub_sim_runners):
+                    self._failed = True
+                    self._finished = False
+                    self._running = False
+                elif all(
+                    getattr(sub, "_finished", False) for sub in self._sub_sim_runners
+                ):
+                    self._failed = False
+                    self._finished = True
+                    self._running = False
+                else:
+                    self._running = any(sub.running for sub in self._sub_sim_runners)
+
+    def _run_local(self, run_nos: list[int]) -> None:
+        """Run simulations locally (blocking). Override in subclasses."""
+        for sub_runner in self._sub_sim_runners:
+            sub_runner.run(run_nos=run_nos, use_hpc=False)
+        self._update_status()
+
+    def _run_hpc(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
+        """Submit simulations to HPC (non-blocking). Override in subclasses."""
+        self._running = True
+        for sub_runner in self._sub_sim_runners:
+            sub_runner.run(run_nos=run_nos, runtime=runtime, use_hpc=True)
 
     @property
     def running(self) -> bool:
-        """
-        A runner is considered “running” if any of its sub-runners is running.
-        Subclasses can override if they maintain their own `_running` flag.
-        """
-        return any(getattr(sub, "_running", False) for sub in self._sub_sim_runners)
+        """True if this runner or any sub-runner is currently running."""
+        self._update_status()
+
+        # first check our own status
+        if hasattr(self, '_running') and self._running:
+            return True
+
+        # check sub-runners; if there are child runners
+        if self._sub_sim_runners:
+            return any(sub.running for sub in self._sub_sim_runners)
+
+        # if no child runners -> return False
+        return False
 
     @property
     def finished(self) -> bool:
-        """True if all sub-runners are marked “finished” and none failed."""
-        return all(getattr(sub, "_finished", False) for sub in self._sub_sim_runners) and not self.failed
+        """True if all sub-runners are finished and none failed."""
+        self._update_status()
+
+        # if there are no children, simply look at this runner’s own _finished attribute
+        if not self._sub_sim_runners:
+            return getattr(self, '_finished', False)
+
+        return (
+            all(getattr(sub, "finished", False) for sub in self._sub_sim_runners)
+            and not self.failed  # the runner and any of its descendants cannot be failed
+        )
 
     @property
     def failed(self) -> bool:
-        """True if any sub-runner has `_failed == True`."""
-        return any(getattr(sub, "_failed", False) for sub in self._sub_sim_runners)
+        """True if this runner or any sub-runner has failed."""
+        self._update_status()
 
+        # Check our own status first
+        if hasattr(self, '_failed') and self._failed:
+            return True
+
+        # Then check sub-runners
+        if self._sub_sim_runners:
+            return any(sub.failed for sub in self._sub_sim_runners)
+
+        return False
 
     @property
     def failed_simulations(self) -> list["SimulationRunner"]:
@@ -131,13 +232,19 @@ class SimulationRunner(ABC):
         Return a flat list of any descendant sub-runners whose `.failed == True`.
         """
         result = []
+
+        # Add ourselves if we failed
+        if hasattr(self, '_failed') and self._failed:
+            result.append(self)
+
+        # Recursively check sub-runners
         for sub in self._sub_sim_runners:
-            if getattr(sub, "_failed", False):
+            if sub.failed:
                 result.append(sub)
-            # Recurse into grandchildren
+            # Get failed simulations from sub-runners recursively
             result.extend(sub.failed_simulations)
+
         return result
-    
 
     def get_tot_simulation_time(self, run_nos: Optional[list[int]] = None) -> float:
         """
@@ -210,15 +317,6 @@ class SimulationRunner(ABC):
                 for sub_sim_runner in self._sub_sim_runners
             ]
         )  # GPU hours
-
-    @property
-    def failed_simulations(self) -> list["SimulationRunner"]:
-        """The failed sub-simulation runners"""
-        return [
-            failure
-            for sub_sim_runner in self._sub_sim_runners
-            for failure in sub_sim_runner.failed_simulations
-        ]
 
     def is_equilibrated(self, run_nos: Optional[list[int]] = None) -> bool:
         """
@@ -346,4 +444,4 @@ class SimulationRunner(ABC):
         #     pickle.dump(self._picklable_copy.__dict__, ofile)
         # for sub_sim_runner in self._sub_sim_runners:
         #     sub_sim_runner._dump()
-        pass
+        raise NotImplementedError()
