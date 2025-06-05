@@ -19,6 +19,7 @@ class JobStatus(int, Enum):
     FINISHED = 2
     FAILED = 3
     KILLED = 4
+    RUNNING = 5
 
 
 class GromacsLambdaMdpTemplate(str, Enum):

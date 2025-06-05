@@ -55,8 +55,14 @@ class Simulation:
         )
         self.finished = False
         self.failed = False
+        self._running = False  # Add this attribute
 
         self._validate_inputs()
+
+    @property
+    def running(self):
+        """Required property for compatibility with SimulationRunner"""
+        return self._running
 
     def _validate_inputs(self):
         if not self.work_dir.exists():
@@ -130,7 +136,15 @@ class Simulation:
         self.mdp_file = str(mdp_out)
 
     def run(self):
-        # 1. gmx grompp
+        """Run the simulation"""
+        self._running = True  # Set running to True at startz
+
+        # 1. Setup if not already done
+        if not hasattr(self, 'mdp_file'):
+            logger.warning('Must setup system first before running simulation...')
+            self.setup()
+
+        # 2. gmx grompp
         logger.info(f"Preparing tpr for lambda {self.lam_state} in {self.work_dir}")
         grompp_cmd = [
             self.gmx_exe,
@@ -153,7 +167,7 @@ class Simulation:
             self.failed = True
             return
 
-        # 2. gmx mdrun
+        # 3. gmx mdrun
         logger.info(f"Running mdrun for lambda {self.lam_state} in {self.work_dir}")
         mdrun_cmd = [
             self.gmx_exe,
