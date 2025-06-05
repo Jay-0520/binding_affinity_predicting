@@ -264,12 +264,11 @@ class Leg(SimulationRunner):
                     os.symlink(os.path.relpath(srcfile, start=run_dir), destfile)
 
                 # c) copy (not symlink) the MDP template and run script into run_dir
-                for fname in ("lambda.template.mdp", "submit_gmx.sh"):
-                    srcfile = leg_input / fname
-                    destfile = run_dir / fname
-                    if not srcfile.exists():
-                        raise FileNotFoundError(f"Missing template/script at {srcfile}")
-                    shutil.copy(srcfile, destfile)
+                src_submit = leg_input / "submit_gmx.sh"
+                dst_submit = run_dir / "submit_gmx.sh"
+                if not src_submit.exists():
+                    raise FileNotFoundError(f"Missing run script at {src_submit}")
+                shutil.copy(src_submit, dst_submit)
 
     def _instantiate_lambda_windows(self) -> None:
         """
@@ -283,6 +282,10 @@ class Leg(SimulationRunner):
         coul_full = self.sim_config.coul_lambdas[self.leg_type]
         vdw_full = self.sim_config.vdw_lambdas[self.leg_type]
 
+        master_template = Path(self.input_dir) / "lambda.template.mdp"
+        if not master_template.exists():
+            raise FileNotFoundError(f"MDP template not found at {master_template}")
+
         for lam_idx in self.lam_indices:
             for run_idx in range(1, self.ensemble_size + 1):
                 run_dir = leg_base / f"lambda_{lam_idx}" / f"run_{run_idx}"
@@ -291,7 +294,7 @@ class Leg(SimulationRunner):
 
                 sim_params = {
                     "gmx_exe": "gmx",
-                    "mdp_template": str(run_dir / "lambda.template.mdp"),
+                    "mdp_template": str(master_template),
                     "gro_file": str(
                         run_dir
                         / f"{self.leg_type.name.lower()}{suffix}_{run_idx}_final.gro"
