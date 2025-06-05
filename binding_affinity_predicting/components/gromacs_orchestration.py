@@ -80,10 +80,89 @@ class LambdaWindow(SimulationRunner):
                 work_dir=individual_run_dir,  # Use individual run directory
                 **run_specific_params,
             )
+            # Set up the simulation's MDP file immediately
+            sim.setup()
+
             self._sub_sim_runners.append(sim)
 
-        # Call parent setup after creating simulation objects
+        # set up submit scripts for each run directory
+        self._setup_submit_scripts()
+
+        # set up the list of "Simulation" object in this case
         super().setup()
+
+    def _setup_submit_scripts(self) -> None:
+        """
+        Set up submit_gmx.sh scripts from template for each run directory.
+        Customizes the template with lambda-specific and run-specific parameters.
+        """
+        template_path = Path(self.input_dir) / "submit_gmx.template.sh"
+
+        if not template_path.exists():
+            logger.warning(f"Submit template not found at {template_path}")
+            return
+
+        # Read the template content
+        template_content = template_path.read_text()
+
+        for run_no in range(1, self.ensemble_size + 1):
+            run_dir = Path(self.output_dir) / f"run_{run_no}"
+            submit_script_path = run_dir / "submit_gmx.sh"
+
+            # Create customized submit script content
+            customized_content = self._customize_submit_script(template_content, run_no)
+
+            # Write the customized submit script
+            submit_script_path.write_text(customized_content)
+
+            # Make it executable
+            submit_script_path.chmod(0o755)
+
+            logger.info(f"Created submit script: {submit_script_path}")
+
+    def _customize_submit_script(self, template_content: str, run_no: int) -> str:
+        """
+        Customize the submit script template with lambda and run-specific values.
+        """
+        # get the corresponding simulation for this run
+        sim = self._sub_sim_runners[run_no - 1]
+
+        # mypy needs this to be happy
+        if (
+            sim.mdp_file is None
+            or sim.gro_file is None
+            or sim.top_file is None
+            or sim.tpr_file is None
+        ):
+            raise RuntimeError(
+                "Expected sim.mdp_file, gro_file, top_file, tpr_file to be set"
+            )
+
+        # dictionary of replacements
+        replacements = {
+            "LAMBDA_STATE": str(self.lam_state),
+            "RUN_NUMBER": str(run_no),
+            "JOB_NAME": f"lambda_{self.lam_state}_run_{run_no}",
+            "OUTPUT_PREFIX": f"lambda_{self.lam_state}_run_{run_no}",
+            "GMX_EXE": self.sim_params.get("gmx_exe", "gmx"),
+            "MDP_FILE": os.path.basename(sim.mdp_file),
+            "GRO_FILE": os.path.basename(sim.gro_file),
+            "TOP_FILE": os.path.basename(sim.top_file),
+            "TPR_FILE": os.path.basename(sim.tpr_file),
+        }
+
+        # add any extra parameters from sim_params
+        if "extra_params" in self.sim_params:
+            for key, value in self.sim_params["extra_params"].items():
+                replacements[key.upper()] = str(value)
+
+        # perform the replacements
+        customized_content = template_content
+        for placeholder, value in replacements.items():
+            customized_content = customized_content.replace(f"{{{placeholder}}}", value)
+            customized_content = customized_content.replace(f"${placeholder}", value)
+
+        return customized_content
 
     def run(
         self,
@@ -151,6 +230,18 @@ class LambdaWindow(SimulationRunner):
                 f"Submitted lambda {self.lam_state}, run {run_no} to "
                 f"SLURM (job ID: {job.virtual_job_id})"
             )
+
+    def __str__(self) -> str:
+        """
+        Return a string representation of the LambdaWindow class.
+        """
+        return (
+            f"{self.__class__.__name__}"
+            f"[lam_state = {self.lam_state},"
+            f" ensemble={self.ensemble_size},"
+            f" input={Path(self.input_dir).name},"
+            f" output={Path(self.output_dir).name}]"
+        )
 
 
 class Leg(SimulationRunner):
@@ -244,10 +335,10 @@ class Leg(SimulationRunner):
             raise FileNotFoundError(f"MDP template not found at {tmpl_mdp}")
         shutil.copy(tmpl_mdp, leg_input / "lambda.template.mdp")
 
-        run_scr = Path(self.input_dir) / "submit_gmx.sh"
+        run_scr = Path(self.input_dir) / "submit_gmx.template.sh"
         if not run_scr.exists():
             raise FileNotFoundError(f"Run script not found at {run_scr}")
-        shutil.copy(run_scr, leg_input / "submit_gmx.sh")
+        shutil.copy(run_scr, leg_input / "submit_gmx.template.sh")
 
     def _make_lambda_run_dirs_and_link(self, leg_input: Path) -> None:
         """
@@ -256,7 +347,7 @@ class Leg(SimulationRunner):
           - {leg}_equilibrated_{r}_final.top
           - restraint_{r}.itp    (only for BOUND)
           - lambda.template.mdp
-          - submit_gmx.sh
+          - submit_gmx.template.sh
         """
         suffix = PreparationStage.EQUILIBRATED.file_suffix
         leg_base = Path(self.output_dir)
@@ -289,11 +380,11 @@ class Leg(SimulationRunner):
                     os.symlink(os.path.relpath(srcfile, start=run_dir), destfile)
 
                 # c) copy (not symlink) the MDP template and run script into run_dir
-                src_submit = leg_input / "submit_gmx.sh"
-                dst_submit = run_dir / "submit_gmx.sh"
-                if not src_submit.exists():
-                    raise FileNotFoundError(f"Missing run script at {src_submit}")
-                shutil.copy(src_submit, dst_submit)
+                # src_submit = leg_input / "submit_gmx.template.sh"
+                # dst_submit = run_dir / "submit_gmx.template.sh"
+                # if not src_submit.exists():
+                #     raise FileNotFoundError(f"Missing run script at {src_submit}")
+                # shutil.copy(src_submit, dst_submit)
 
     def _instantiate_lambda_windows(self) -> None:
         """
@@ -321,7 +412,7 @@ class Leg(SimulationRunner):
             # Pass file name templates that LambdaWindow can use to construct
             # run-specific paths
             sim_params = {
-                "gmx_exe": "gmx",
+                "gmx_exe": getattr(self.sim_config, 'gmx_exe', 'gmx'),
                 "mdp_template": str(master_template),
                 "gro_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.gro",
                 "top_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.top",
@@ -387,6 +478,18 @@ class Leg(SimulationRunner):
             f"with {len(self._sub_sim_runners)} windows"
         )
         super()._run_hpc(run_nos, runtime)
+
+    def __str__(self) -> str:
+        """
+        Return a string representation of the Leg class.
+        """
+        return (
+            f"{self.__class__.__name__}"
+            f"[Leg_type = {self.leg_type},"
+            f" ensemble={self.ensemble_size},"
+            f" input={Path(self.input_dir).name},"
+            f" output={Path(self.output_dir).name}]"
+        )
 
 
 class Calculation(SimulationRunner):
