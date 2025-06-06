@@ -13,7 +13,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from binding_affinity_predicting.components.simulation import Simulation
 from binding_affinity_predicting.components.simulation_base import SimulationRunner
@@ -22,6 +22,14 @@ from binding_affinity_predicting.data.schemas import (
     GromacsFepSimulationConfig,
 )
 from binding_affinity_predicting.hpc_cluster.virtual_queue import Job, VirtualQueue
+from binding_affinity_predicting.simulation.mdp_parameters import (
+    MDPGenerator,
+    create_custom_mdp_generator,
+)
+from binding_affinity_predicting.simulation.slurm_parameters import (
+    SlurmSubmitGenerator,
+    create_custom_slurm_generator,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,6 +46,8 @@ class LambdaWindow(SimulationRunner):
         sim_params: dict,
         ensemble_size: int = 5,
         virtual_queue: Optional[VirtualQueue] = None,
+        mdp_generator: Optional[MDPGenerator] = None,
+        slurm_generator: Optional[SlurmSubmitGenerator] = None,
     ):
         super().__init__(
             input_dir=input_dir, output_dir=work_dir, ensemble_size=ensemble_size
@@ -46,8 +56,28 @@ class LambdaWindow(SimulationRunner):
         self.virtual_queue = virtual_queue
         self.sim_params = sim_params
 
+        # Initialize Pydantic-based generators
+        self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
+        self.slurm_generator = slurm_generator or self._create_default_slurm_generator()
+
         # Initialize _sub_sim_runners as list of Simulation objects
         self._sub_sim_runners: list[Simulation] = []  # type: ignore
+
+    def _create_default_mdp_generator(self) -> MDPGenerator:
+        """Create default MDP generator with parameters from sim_params."""
+        # Extract MDP-specific parameters from sim_params
+        mdp_overrides = self.sim_params.get("mdp_overrides", {})
+
+        # Create generator with any custom MDP parameters
+        return create_custom_mdp_generator(**mdp_overrides)
+
+    def _create_default_slurm_generator(self) -> SlurmSubmitGenerator:
+        """Create default SLURM generator with parameters from sim_params."""
+        # Extract SLURM-specific parameters from sim_params
+        slurm_overrides = self.sim_params.get("slurm_overrides", {})
+
+        # Create generator with any custom SLURM parameters
+        return create_custom_slurm_generator(**slurm_overrides)
 
     def setup(self) -> None:
         """Set up simulation objects for each run in this lambda window"""
@@ -59,110 +89,86 @@ class LambdaWindow(SimulationRunner):
             individual_run_dir = Path(self.output_dir) / f"run_{run_no}"
 
             # Create run-specific sim_params by formatting templates
-            run_specific_params = self.sim_params.copy()
-            if "gro_file_template" in self.sim_params:
-                run_specific_params["gro_file"] = str(
-                    individual_run_dir
-                    / self.sim_params["gro_file_template"].format(run_idx=run_no)
-                )
-                del run_specific_params["gro_file_template"]
+            gro_file, top_file = self._prepare_run_specific_files(
+                run_no, individual_run_dir
+            )
 
-            if "top_file_template" in self.sim_params:
-                run_specific_params["top_file"] = str(
-                    individual_run_dir
-                    / self.sim_params["top_file_template"].format(run_idx=run_no)
-                )
-                del run_specific_params["top_file_template"]
+            # Generate MDP file for this run using Pydantic generator
+            # self._generate_mdp_file(individual_run_dir, run_no)
 
+            # Create simulation object with Pydantic generators
             sim = Simulation(
                 lam_state=self.lam_state,
+                gro_file=gro_file,
+                top_file=top_file,
+                work_dir=individual_run_dir,
                 run_index=run_no,
-                work_dir=individual_run_dir,  # Use individual run directory
-                **run_specific_params,
+                gmx_exe=self.sim_params.get("gmx_exe", "gmx"),
+                bonded_list=self.sim_params.get("bonded_list", []),
+                coul_list=self.sim_params.get("coul_list", []),
+                vdw_list=self.sim_params.get("vdw_list", []),
+                extra_params=self.sim_params.get("extra_params", {}),
+                mdp_generator=self.mdp_generator,
+                slurm_generator=self.slurm_generator,
+                runtime_ns=self.sim_params.get("runtime_ns"),
+                mdp_overrides=self.sim_params.get("mdp_overrides", {}),
             )
             # Set up the simulation's MDP file immediately
             sim.setup()
 
             self._sub_sim_runners.append(sim)
 
-        # set up submit scripts for each run directory
-        self._setup_submit_scripts()
+        # Generate SLURM submit scripts for each simulation
+        self._generate_submit_scripts()
 
         # set up the list of "Simulation" object in this case
         super().setup()
 
-    def _setup_submit_scripts(self) -> None:
+    def _prepare_run_specific_files(
+        self, run_no: int, run_dir: Path
+    ) -> tuple[str, str]:
+        """Prepare run-specific file paths by resolving templates."""
+        if "gro_file_template" in self.sim_params:
+            gro_file = str(
+                run_dir / self.sim_params["gro_file_template"].format(run_idx=run_no)
+            )
+        else:
+            gro_file = self.sim_params.get("gro_file", str(run_dir / "system.gro"))
+
+        if "top_file_template" in self.sim_params:
+            top_file = str(
+                run_dir / self.sim_params["top_file_template"].format(run_idx=run_no)
+            )
+        else:
+            top_file = self.sim_params.get("top_file", str(run_dir / "system.top"))
+
+        return gro_file, top_file
+
+    def _generate_submit_scripts(self) -> None:
         """
-        Set up submit_gmx.sh scripts from template for each run directory.
-        Customizes the template with lambda-specific and run-specific parameters.
+        Generate SLURM submit scripts for each simulation.
+        This is done in LambdaWindow because it coordinates the ensemble.
         """
-        template_path = Path(self.input_dir) / "submit_gmx.template.sh"
-
-        if not template_path.exists():
-            logger.warning(f"Submit template not found at {template_path}")
-            return
-
-        # Read the template content
-        template_content = template_path.read_text()
-
         for run_no in range(1, self.ensemble_size + 1):
-            run_dir = Path(self.output_dir) / f"run_{run_no}"
-            submit_script_path = run_dir / "submit_gmx.sh"
+            sim = self._sub_sim_runners[run_no - 1]
 
-            # Create customized submit script content
-            customized_content = self._customize_submit_script(template_content, run_no)
+            # Get SLURM parameters from sim_params
+            modules_to_load = self.sim_params.get("modules_to_load", [])
+            slurm_overrides = self.sim_params.get("slurm_overrides", {})
+            pre_commands = self.sim_params.get("pre_commands", [])
+            post_commands = self.sim_params.get("post_commands", [])
 
-            # Write the customized submit script
-            submit_script_path.write_text(customized_content)
-
-            # Make it executable
-            submit_script_path.chmod(0o755)
-
-            logger.info(f"Created submit script: {submit_script_path}")
-
-    def _customize_submit_script(self, template_content: str, run_no: int) -> str:
-        """
-        Customize the submit script template with lambda and run-specific values.
-        """
-        # get the corresponding simulation for this run
-        sim = self._sub_sim_runners[run_no - 1]
-
-        # mypy needs this to be happy
-        if (
-            sim.mdp_file is None
-            or sim.gro_file is None
-            or sim.top_file is None
-            or sim.tpr_file is None
-        ):
-            raise RuntimeError(
-                "Expected sim.mdp_file, gro_file, top_file, tpr_file to be set"
+            # Generate submit script using the simulation's method
+            sim.generate_submit_script(
+                modules_to_load=modules_to_load,
+                slurm_overrides=slurm_overrides,  # params are overrided here
+                pre_commands=pre_commands,
+                post_commands=post_commands,
             )
 
-        # dictionary of replacements
-        replacements = {
-            "LAMBDA_STATE": str(self.lam_state),
-            "RUN_NUMBER": str(run_no),
-            "JOB_NAME": f"lambda_{self.lam_state}_run_{run_no}",
-            "OUTPUT_PREFIX": f"lambda_{self.lam_state}_run_{run_no}",
-            "GMX_EXE": self.sim_params.get("gmx_exe", "gmx"),
-            "MDP_FILE": os.path.basename(sim.mdp_file),
-            "GRO_FILE": os.path.basename(sim.gro_file),
-            "TOP_FILE": os.path.basename(sim.top_file),
-            "TPR_FILE": os.path.basename(sim.tpr_file),
-        }
-
-        # add any extra parameters from sim_params
-        if "extra_params" in self.sim_params:
-            for key, value in self.sim_params["extra_params"].items():
-                replacements[key.upper()] = str(value)
-
-        # perform the replacements
-        customized_content = template_content
-        for placeholder, value in replacements.items():
-            customized_content = customized_content.replace(f"{{{placeholder}}}", value)
-            customized_content = customized_content.replace(f"${placeholder}", value)
-
-        return customized_content
+            logger.info(
+                f"Generated submit script for lambda {self.lam_state}, run {run_no}"
+            )
 
     def run(
         self,
@@ -261,6 +267,8 @@ class Leg(SimulationRunner):
         output_dir: str,
         sim_config: GromacsFepSimulationConfig,
         virtual_queue: Optional[VirtualQueue] = None,
+        mdp_generator: Optional[MDPGenerator] = None,
+        slurm_generator: Optional[SlurmSubmitGenerator] = None,
     ):
         super().__init__(
             input_dir=input_dir,
@@ -271,16 +279,29 @@ class Leg(SimulationRunner):
         self.leg_type = leg_type
         self.lam_indices = lam_indices
         self.sim_config = sim_config
+
+        # Initialize Pydantic-based generators
+        self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
+        self.slurm_generator = slurm_generator or self._create_default_slurm_generator()
         self._sub_sim_runners: list["LambdaWindow"] = []  # type: ignore[assignment]
+
+    def _create_default_mdp_generator(self) -> MDPGenerator:
+        """Create default MDP generator with parameters from sim_config."""
+        mdp_overrides = getattr(self.sim_config, 'mdp_overrides', {})
+        return create_custom_mdp_generator(**mdp_overrides)
+
+    def _create_default_slurm_generator(self) -> SlurmSubmitGenerator:
+        """Create default SLURM generator with parameters from sim_config."""
+        slurm_overrides = getattr(self.sim_config, 'slurm_overrides', {})
+        return create_custom_slurm_generator(**slurm_overrides)
 
     def setup(self) -> None:
         """
         Break down the large setup into discrete steps:
           1) prepare_leg_base()
           2) copy_equilibrated_files()
-          3) copy_common_templates()
-          4) make_lambda_run_dirs_and_link()
-          5) instantiate_lambda_windows()
+          3) make_lambda_run_dirs_and_link()
+          4) instantiate_lambda_windows()
         """
         leg_base = Path(self.output_dir)
         leg_base.mkdir(parents=True, exist_ok=True)
@@ -292,13 +313,10 @@ class Leg(SimulationRunner):
         # 2) Copy pre‐equilibrated .gro/.top/.itp into leg_input
         self._copy_equilibrated_files(leg_input)
 
-        # 3) Copy the MDP template + run script into leg_input
-        self._copy_common_templates(leg_input)
-
-        # 4) For each λ index and each replicate, make run dirs & symlink inputs
+        # 3) For each λ index and each replicate, make run dirs & symlink inputs
         self._make_lambda_run_dirs_and_link(leg_input)
 
-        # 5) Finally, build each LambdaWindow and call its setup()
+        # 4) Finally, build each LambdaWindow and call its setup()
         self._instantiate_lambda_windows()
 
     def _copy_equilibrated_files(self, leg_input: Path) -> None:
@@ -325,20 +343,6 @@ class Leg(SimulationRunner):
                 if not src_rest.exists():
                     raise FileNotFoundError(f"Cannot find {src_rest}")
                 shutil.copy(src_rest, leg_input / restr_name)
-
-    def _copy_common_templates(self, leg_input: Path) -> None:
-        """
-        Copy the λ‐template.mdp and submit_gmx.sh script into leg_input.
-        """
-        tmpl_mdp = Path(self.input_dir) / "lambda.template.mdp"
-        if not tmpl_mdp.exists():
-            raise FileNotFoundError(f"MDP template not found at {tmpl_mdp}")
-        shutil.copy(tmpl_mdp, leg_input / "lambda.template.mdp")
-
-        run_scr = Path(self.input_dir) / "submit_gmx.template.sh"
-        if not run_scr.exists():
-            raise FileNotFoundError(f"Run script not found at {run_scr}")
-        shutil.copy(run_scr, leg_input / "submit_gmx.template.sh")
 
     def _make_lambda_run_dirs_and_link(self, leg_input: Path) -> None:
         """
@@ -379,13 +383,6 @@ class Leg(SimulationRunner):
 
                     os.symlink(os.path.relpath(srcfile, start=run_dir), destfile)
 
-                # c) copy (not symlink) the MDP template and run script into run_dir
-                # src_submit = leg_input / "submit_gmx.template.sh"
-                # dst_submit = run_dir / "submit_gmx.template.sh"
-                # if not src_submit.exists():
-                #     raise FileNotFoundError(f"Missing run script at {src_submit}")
-                # shutil.copy(src_submit, dst_submit)
-
     def _instantiate_lambda_windows(self) -> None:
         """
         Now that each run_{r} folder exists under lambda_{k}, create one LambdaWindow
@@ -394,13 +391,11 @@ class Leg(SimulationRunner):
         suffix = PreparationStage.EQUILIBRATED.file_suffix
         leg_base = Path(self.output_dir)
 
-        bonded_full = self.sim_config.bonded_lambdas[self.leg_type]  # list of floats
-        coul_full = self.sim_config.coul_lambdas[self.leg_type]
-        vdw_full = self.sim_config.vdw_lambdas[self.leg_type]
-
-        master_template = Path(self.input_dir) / "lambda.template.mdp"
-        if not master_template.exists():
-            raise FileNotFoundError(f"MDP template not found at {master_template}")
+        bonded_full: list[float] = self.sim_config.bonded_lambdas[
+            self.leg_type
+        ]  # list of floats
+        coul_full: list[float] = self.sim_config.coul_lambdas[self.leg_type]
+        vdw_full: list[float] = self.sim_config.vdw_lambdas[self.leg_type]
 
         # Create ONE LambdaWindow per lambda index (not per run)
         for lam_idx in self.lam_indices:
@@ -409,28 +404,33 @@ class Leg(SimulationRunner):
             # TODO: temporary value for testing the code
             λ_float = self.sim_config.coul_lambdas[self.leg_type][lam_idx]
 
-            # Pass file name templates that LambdaWindow can use to construct
-            # run-specific paths
+            # Prepare sim_params for this lambda window
             sim_params = {
                 "gmx_exe": getattr(self.sim_config, 'gmx_exe', 'gmx'),
-                "mdp_template": str(master_template),
                 "gro_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.gro",
                 "top_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.top",
                 "extra_params": {"lambda_float": λ_float},
                 "bonded_list": bonded_full,
                 "coul_list": coul_full,
                 "vdw_list": vdw_full,
+                # Add parameters from sim_config
+                "runtime_ns": getattr(self.sim_config, 'runtime_ns', None),
+                "mdp_overrides": getattr(self.sim_config, 'mdp_overrides', {}),
+                "slurm_overrides": getattr(self.sim_config, 'slurm_overrides', {}),
+                "modules_to_load": getattr(self.sim_config, 'modules_to_load', []),
+                "pre_commands": getattr(self.sim_config, 'pre_commands', []),
+                "post_commands": getattr(self.sim_config, 'post_commands', []),
             }
 
             window = LambdaWindow(
                 lam_state=lam_idx,
                 input_dir=self.input_dir,
-                work_dir=str(
-                    lam_dir
-                ),  # Pass the lambda directory, not individual run dirs
+                work_dir=str(lam_dir),
                 sim_params=sim_params,
                 ensemble_size=self.ensemble_size,
                 virtual_queue=self.virtual_queue,
+                mdp_generator=self.mdp_generator,
+                slurm_generator=self.slurm_generator,
             )
             self._sub_sim_runners.append(window)
             window.setup()
@@ -511,6 +511,8 @@ class Calculation(SimulationRunner):
         runtime_constant: Optional[float] = 0.001,
         ensemble_size: int = 5,
         virtual_queue: Optional[VirtualQueue] = None,
+        mdp_generator: Optional[MDPGenerator] = None,
+        slurm_generator: Optional[SlurmSubmitGenerator] = None,
     ) -> None:
         # Set up virtual queue if not provided
         if virtual_queue is None:
@@ -525,7 +527,21 @@ class Calculation(SimulationRunner):
         self.sim_config = sim_config
         self.equil_detection = equil_detection
         self.runtime_constant = runtime_constant
+
+        # Initialize Pydantic-based generators at the calculation level
+        self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
+        self.slurm_generator = slurm_generator or self._create_default_slurm_generator()
         self._sub_sim_runners: list[Leg] = []  # type: ignore[assignment]
+
+    def _create_default_mdp_generator(self) -> MDPGenerator:
+        """Create default MDP generator from sim_config."""
+        mdp_overrides = getattr(self.sim_config, 'mdp_overrides', {})
+        return create_custom_mdp_generator(**mdp_overrides)
+
+    def _create_default_slurm_generator(self) -> SlurmSubmitGenerator:
+        """Create default SLURM generator from sim_config."""
+        slurm_overrides = getattr(self.sim_config, 'slurm_overrides', {})
+        return create_custom_slurm_generator(**slurm_overrides)
 
     def setup(self) -> None:
         if getattr(self, "setup_complete", False):
@@ -550,6 +566,8 @@ class Calculation(SimulationRunner):
                 ensemble_size=self.ensemble_size,
                 sim_config=self.sim_config,
                 virtual_queue=self.virtual_queue,
+                mdp_generator=self.mdp_generator,
+                slurm_generator=self.slurm_generator,
             )
             self._sub_sim_runners.append(leg)
 
@@ -557,6 +575,7 @@ class Calculation(SimulationRunner):
         super().setup()
         self.setup_complete = True
         # self._dump()
+        logger.info("ABFE calculation setup completed successfully")
 
     def run(
         self,
@@ -614,3 +633,45 @@ class Calculation(SimulationRunner):
         """Clean simulation files from all legs"""
         for leg in self._sub_sim_runners:
             leg.clean_simulations(clean_logs=clean_logs)
+
+    def get_simulation_status(self) -> dict[str, Any]:
+        """Get detailed status of all simulations."""
+        status: dict[str, Any] = {
+            "total_simulations": 0,
+            "finished": 0,
+            "failed": 0,
+            "running": 0,
+            "legs": {},
+        }
+
+        for leg in self._sub_sim_runners:
+            leg_status: dict[str, Any] = {
+                "lambda_windows": len(leg._sub_sim_runners),
+                "windows": {},
+            }
+
+            for window in leg._sub_sim_runners:
+                window_status = {
+                    "simulations": len(window._sub_sim_runners),
+                    "finished": 0,
+                    "failed": 0,
+                    "running": 0,
+                }
+
+                for sim in window._sub_sim_runners:
+                    status["total_simulations"] += 1
+                    if sim.finished:
+                        status["finished"] += 1
+                        window_status["finished"] += 1
+                    elif sim.failed:
+                        status["failed"] += 1
+                        window_status["failed"] += 1
+                    elif sim.running:
+                        status["running"] += 1
+                        window_status["running"] += 1
+
+                leg_status["windows"][f"lambda_{window.lam_state}"] = window_status
+
+            status["legs"][leg.leg_type.name.lower()] = leg_status
+
+        return status
