@@ -28,7 +28,7 @@ class StatusMonitor:
         if update_hpc:
             self._update_hpc_statuses()
 
-        status = {
+        status: dict[str, Any] = {
             "job_counts": {
                 "RUNNING": 0,
                 "FINISHED": 0,
@@ -171,11 +171,9 @@ class StatusMonitor:
     def _check_for_errors(self, work_path: Path) -> bool:
         """Check for error indicators in work directory."""
         try:
-            # Check for error files
             if list(work_path.glob("*.err")) or list(work_path.glob("core.*")):
                 return True
 
-            # Check log files for fatal errors
             for log_file in work_path.glob("*.log"):
                 try:
                     with open(log_file, "r") as f:
@@ -203,7 +201,6 @@ class StatusMonitor:
         failed = job_counts.get("FAILED", 0)
         running = job_counts.get("RUNNING", 0)
         queue = job_counts.get("QUEUED", 0)
-        # none_job = job_counts.get("NONE", 0)
 
         total = status.get("total_jobs", finished + failed + running + queue)
 
