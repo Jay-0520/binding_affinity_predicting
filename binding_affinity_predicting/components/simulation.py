@@ -286,13 +286,10 @@ class Simulation:
             "mdrun",
             "-deffnm",
             f"lambda_{self.lam_state}_run_{self.run_index}",
+            "-cpi",
+            # this always works even if the cpt file does not exist
+            f"lambda_{self.lam_state}_run_{self.run_index}.cpt",
         ]
-
-        # if a checkpoint file is present, continue from it
-        cptfile = self.work_dir / f"lambda_{self.lam_state}_run_{self.run_index}.cpt"
-        if cptfile.exists():
-            mdrun_cmd += ["-cpi", str(cptfile.name)]
-
         try:
             result = subprocess.run(
                 mdrun_cmd, cwd=self.work_dir, check=True, capture_output=True, text=True
