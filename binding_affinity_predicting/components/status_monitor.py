@@ -112,6 +112,8 @@ class StatusMonitor:
                 lam_state = getattr(sim, "lam_state", 0)
 
                 # Look for typical GROMACS output files
+                # TODO: now we hard-coded the output file format file
+                # need to centralize this somewhere
                 output_patterns = [
                     f"lambda_{lam_state}_run_{run_index}.log",
                     f"lambda_{lam_state}_run_{run_index}.edr",
@@ -206,7 +208,7 @@ class StatusMonitor:
 
         failed_job_locations = status.get("job_locations", {}).get("FAILED", []) or []
 
-        summary = f"{finished}/{total} finished, {failed} failed, {running} running, {queue} on queue."  # noqa
+        summary = f"{finished}/{total} finished, {failed} failed, {running} running, {queue} queue."  # noqa
 
         if failed_job_locations:
             locs_str = ", ".join(failed_job_locations)
