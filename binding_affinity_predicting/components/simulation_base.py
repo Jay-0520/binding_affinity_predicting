@@ -154,7 +154,7 @@ class SimulationRunner(ABC):
                 # Otherwise, at least one job is still pending/running
                 self._running = True
         else:
-            # --- Local branch: look at each SimulationRunner’s flags ---
+            # --- Local branch: look at each SimulationRunner`s flags ---
             if self._sub_sim_runners:
                 if any(getattr(sub, "_failed", False) for sub in self._sub_sim_runners):
                     self._failed = True
@@ -187,7 +187,7 @@ class SimulationRunner(ABC):
         self._update_status()
 
         # first check our own status
-        if hasattr(self, '_running') and self._running:
+        if hasattr(self, "_running") and self._running:
             return True
 
         # check sub-runners; if there are child runners
@@ -202,9 +202,9 @@ class SimulationRunner(ABC):
         """True if all sub-runners are finished and none failed."""
         self._update_status()
 
-        # if there are no children, simply look at this runner’s own _finished attribute
+        # if there are no children, simply look at this runner`s own _finished attribute
         if not self._sub_sim_runners:
-            return getattr(self, '_finished', False)
+            return getattr(self, "_finished", False)
 
         return (
             all(getattr(sub, "finished", False) for sub in self._sub_sim_runners)
@@ -217,7 +217,7 @@ class SimulationRunner(ABC):
         self._update_status()
 
         # Check our own status first
-        if hasattr(self, '_failed') and self._failed:
+        if hasattr(self, "_failed") and self._failed:
             return True
 
         # Then check sub-runners
@@ -234,7 +234,7 @@ class SimulationRunner(ABC):
         result = []
 
         # Add ourselves if we failed
-        if hasattr(self, '_failed') and self._failed:
+        if hasattr(self, "_failed") and self._failed:
             result.append(self)
 
         # Recursively check sub-runners

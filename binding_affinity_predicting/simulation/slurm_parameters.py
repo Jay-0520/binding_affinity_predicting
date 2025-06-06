@@ -33,17 +33,17 @@ class SlurmParameters(BaseModel):
         default_factory=dict, description="Additional SLURM directives"
     )
 
-    @field_validator('time')
+    @field_validator("time")
     def validate_time_format(cls, v):
         """Validate SLURM time format."""
         import re
 
         # Accept formats like: 10:00:00, 1-10:00:00, 60, 60:00
         time_patterns = [
-            r'^\d+$',  # minutes only
-            r'^\d+:\d{2}$',  # minutes:seconds
-            r'^\d+:\d{2}:\d{2}$',  # hours:minutes:seconds
-            r'^\d+-\d+:\d{2}:\d{2}$',  # days-hours:minutes:seconds
+            r"^\d+$",  # minutes only
+            r"^\d+:\d{2}$",  # minutes:seconds
+            r"^\d+:\d{2}:\d{2}$",  # hours:minutes:seconds
+            r"^\d+-\d+:\d{2}:\d{2}$",  # days-hours:minutes:seconds
         ]
         if not any(re.match(pattern, v) for pattern in time_patterns):
             raise ValueError(
@@ -51,12 +51,12 @@ class SlurmParameters(BaseModel):
             )
         return v
 
-    @field_validator('mem')
+    @field_validator("mem")
     def validate_memory_format(cls, v):
         """Validate memory format."""
         import re
 
-        if not re.match(r'^\d+[KMGT]?B?$', v, re.IGNORECASE):
+        if not re.match(r"^\d+[KMGT]?B?$", v, re.IGNORECASE):
             raise ValueError(
                 f"Invalid memory format: {v}. Use formats like '16G', '32GB', '1024M', etc."
             )
@@ -79,7 +79,7 @@ class SlurmParameters(BaseModel):
 class SlurmSubmitGenerator:
     """Generates SLURM submit scripts for GROMACS ABFE calculations using Pydantic BaseModel."""
 
-    def __init__(self, base_params: Optional[SlurmParameters] = None):
+    def __init__(self, base_params: Optional[SlurmParameters] = None) -> None:
         """
         Initialize SLURM submit script generator.
 
@@ -180,12 +180,12 @@ class SlurmSubmitGenerator:
             [
                 "",
                 "# Job information",
-                "echo \"Job started at: $(date)\"",
-                f"echo \"Lambda state: {lambda_state}\"",
-                f"echo \"Run number: {run_number}\"",
-                "echo \"Working directory: $(pwd)\"",
-                "echo \"SLURM_JOB_ID: $SLURM_JOB_ID\"",
-                "echo \"Node: $SLURM_NODELIST\"",
+                'echo "Job started at: $(date)"',
+                f'echo "Lambda state: {lambda_state}"',
+                f'echo "Run number: {run_number}"',
+                'echo "Working directory: $(pwd)"',
+                'echo "SLURM_JOB_ID: $SLURM_JOB_ID"',
+                'echo "Node: $SLURM_NODELIST"',
                 "",
             ]
         )
@@ -214,10 +214,10 @@ class SlurmSubmitGenerator:
         lines.extend(
             [
                 "# GROMACS simulation",
-                "echo \"Starting GROMACS preparation...\"",
+                'echo "Starting GROMACS preparation..."',
                 f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",  # noqa
                 "",
-                "echo \"Starting GROMACS simulation...\"",
+                'echo "Starting GROMACS simulation..."',
                 f"{gmx_exe} mdrun -deffnm {output_prefix} -s {tpr_file} -cpi {output_prefix}.cpt",
                 "",
             ]
@@ -233,7 +233,7 @@ class SlurmSubmitGenerator:
                 ]
             )
 
-        lines.extend(["echo \"Job finished at: $(date)\"", "exit 0"])
+        lines.extend(['echo "Job finished at: $(date)"', "exit 0"])
 
         return "\n".join(lines) + "\n"
 

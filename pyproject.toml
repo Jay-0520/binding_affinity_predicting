@@ -39,7 +39,7 @@ dev = [
     "pytest>=6.1.2",
     "pytest-runner",
     "black",
-    "flake8",
+    "ruff",
     "mypy",
     "pydantic[mypy]",
 ]
@@ -59,6 +59,13 @@ skip-string-normalization = true
 python_version = "3.11"
 # plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
+
+
+[tool.ruff]
+ignore = ["ANN101"]
+# Extend any built-in rule sets you like:
+line-length = 100
+target-version = "py311"
 
 
 [tool.setuptools.packages.find]

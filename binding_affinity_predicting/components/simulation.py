@@ -1,9 +1,11 @@
 import logging
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
+from binding_affinity_predicting.data.enums import JobStatus
 from binding_affinity_predicting.simulation.mdp_parameters import (
     MDPGenerator,
     create_custom_mdp_generator,
@@ -38,7 +40,7 @@ class Simulation:
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
         runtime_ns: Optional[float] = None,
         mdp_overrides: Optional[dict[str, Union[str, int, float]]] = None,
-    ):
+    ) -> None:
         """
         Parameters
         ----------
@@ -105,9 +107,17 @@ class Simulation:
         self.mdp_file = str(self.work_dir / f"lambda_{lam_state}.mdp")
 
         # Status tracking
-        self.finished = False
-        self.failed = False
+        self._finished = False
+        self._failed = False
         self._running = False
+
+        # Enhanced status tracking using JobStatus
+        self.job_status = JobStatus.NONE
+        self.start_time: Optional[datetime] = None
+        self.end_time: Optional[datetime] = None
+        self.setup_time: Optional[datetime] = None
+        # Simple flag to track if this was submitted via HPC
+        self._submitted_via_hpc = False
 
         self._validate_inputs()
 
@@ -121,11 +131,21 @@ class Simulation:
         return create_custom_slurm_generator()
 
     @property
-    def running(self):
+    def running(self) -> bool:
         """Required property for compatibility with SimulationRunner"""
         return self._running
 
-    def _validate_inputs(self):
+    @property
+    def failed(self) -> bool:
+        """Whether simulation has failed."""
+        return self._failed
+
+    @property
+    def finished(self) -> bool:
+        """Whether simulation has finished successfully."""
+        return self._finished
+
+    def _validate_inputs(self) -> None:
         """Validate input parameters and create work directory."""
         if not self.work_dir.exists():
             logger.info(f"Creating work directory: {self.work_dir}")
@@ -153,7 +173,7 @@ class Simulation:
         if self.top_file and not Path(self.top_file).exists():
             raise ValueError(f"top_file must be a valid topology file: {self.top_file}")
 
-    def setup(self):
+    def setup(self) -> None:
         """
         Prepare the input files for the simulation using Pydantic generators.
 
@@ -171,6 +191,11 @@ class Simulation:
                 runtime_ns=self.runtime_ns,
                 custom_overrides=self.mdp_overrides,
             )
+            self.setup_time = datetime.now()
+
+            # Update status to QUEUED after setup
+            if self.job_status == JobStatus.NONE:
+                self.job_status = JobStatus.QUEUED
 
             logger.info(
                 f"Generated validated MDP file for lambda {self.lam_state}: {self.mdp_file}"
@@ -180,6 +205,8 @@ class Simulation:
             logger.error(
                 f"Failed to generate MDP file for lambda {self.lam_state}: {e}"
             )
+            self.job_status = JobStatus.FAILED
+            self._failed = True
             raise
 
     def generate_submit_script(
@@ -237,13 +264,17 @@ class Simulation:
             logger.error(f"Failed to generate submit script: {e}")
             raise
 
-    def run(self):
-        """Run the simulation"""
+    def run(self) -> None:
+        """
+        Run the simulation locally (blocking).
+        """
+        self.job_status = JobStatus.RUNNING
+        self.start_time = datetime.now()
         self._running = True  # Set running to True at startz
 
         # 1. Setup if not already done
-        if not hasattr(self, 'mdp_file'):
-            logger.warning('Must setup system first before running simulation...')
+        if not hasattr(self, "mdp_file"):
+            logger.warning("Must setup system first before running simulation...")
             self.setup()
 
         # 2. gmx grompp
@@ -276,7 +307,8 @@ class Simulation:
                 f"grompp failed for λ={self.lam_state} in {self.work_dir}: {e}\n"
                 f"stdout: {e.stdout}\nstderr: {e.stderr}"
             )
-            self.failed = True
+            self.job_status = JobStatus.FAILED
+            self._failed = True
             return
 
         # 3. gmx mdrun
@@ -296,19 +328,49 @@ class Simulation:
             )
             logger.info(f"mdrun completed for λ={self.lam_state}")
             logger.debug(f"mdrun output: {result.stdout}")
-            self.finished = True
+            self._finished = True
+            self.job_status = JobStatus.FINISHED
+
         except subprocess.CalledProcessError as e:
             logger.error(
                 f"mdrun failed for λ={self.lam_state} in {self.work_dir}: {e}\n"
                 f"stdout: {e.stdout}\nstderr: {e.stderr}"
             )
-            self.failed = True
+            self.job_status = JobStatus.FAILED
+            self._failed = True
+            return
 
         self._running = False
+        self.end_time = datetime.now()
 
     @property
-    def failed_simulations(self):
-        return [self] if self.failed else []
+    def failed_simulations(self) -> list["Simulation"]:
+        return [self] if self._failed else []
+
+    @property
+    def runtime_seconds(self) -> float:
+        """Get runtime in seconds."""
+        if self.start_time is None:
+            return 0.0
+        end = self.end_time or datetime.now()
+        return (end - self.start_time).total_seconds()
+
+    @property
+    def status_info(self) -> dict[str, Any]:
+        """Get detailed status information using JobStatus."""
+        return {
+            "job_status": self.job_status.name,
+            "job_status_value": self.job_status.value,
+            "lambda_state": self.lam_state,
+            "run_index": self.run_index,
+            "finished": self._finished,
+            "failed": self._failed,
+            "running": self._running,
+            "setup_time": self.setup_time.isoformat() if self.setup_time else None,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "runtime_seconds": self.runtime_seconds,
+        }
 
     def export_configuration(self, output_dir: Union[str, Path]) -> None:
         """
@@ -336,8 +398,8 @@ class Simulation:
                 "lambda_state": self.lam_state,
                 "run_index": self.run_index,
                 "work_dir": str(self.work_dir),
-                "finished": self.finished,
-                "failed": self.failed,
+                "finished": self._finished,
+                "failed": self._failed,
             },
             "lambda_vectors": {
                 "bonded": self.bonded_list,
@@ -358,5 +420,5 @@ class Simulation:
         """String representation of the simulation."""
         return (
             f"Simulation[λ={self.lam_state}, run={self.run_index}, "
-            f"dir={self.work_dir.name}, finished={self.finished}]"
+            f"dir={self.work_dir.name}, finished={self._finished}]"
         )

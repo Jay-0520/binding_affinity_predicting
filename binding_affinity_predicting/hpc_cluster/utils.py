@@ -4,7 +4,7 @@ import logging
 import os as _os
 import re as _re
 from time import sleep
-from typing import Any, Callable, Optional, TypeVar
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

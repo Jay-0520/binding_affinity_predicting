@@ -8,7 +8,7 @@ TEST_DATA_DIR = Path(__file__).parent / "test_files"
 
 
 def pytest_configure():
-    # Silence only the three SWIG‐generated __module__ deprecation warnings:
+    # Silence only the three SWIG-generated __module__ deprecation warnings:
     for swig in ("SwigPyPacked", "SwigPyObject", "swigvarlink"):
         warnings.filterwarnings(
             "ignore",

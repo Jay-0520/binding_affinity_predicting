@@ -11,10 +11,15 @@ repos:
       - id: black
         args: [--line-length=88]
 
-  - repo: https://github.com/PyCQA/flake8
-    rev: 7.2.0
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.0.282 
     hooks:
-      - id: flake8
+      - id: ruff
+        name: ruff (python)
+        args:
+          - --config=pyproject.toml
+          - --fix
+          - .
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.15.0

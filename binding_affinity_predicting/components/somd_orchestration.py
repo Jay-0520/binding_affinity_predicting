@@ -22,8 +22,8 @@ from binding_affinity_predicting.data.schemas import (
 
 # Notes from the paper - by JJ-2025-05-06
 # The simulations with the ligand in solvent collectively make up the free leg, while those
-# with the receptor–ligand complex make up the bound leg. Sets of calculations where
-# interactions of a given type are introduced or removed are termed stages: receptor–ligand
+# with the receptor-ligand complex make up the bound leg. Sets of calculations where
+# interactions of a given type are introduced or removed are termed stages: receptor-ligand
 # restraints were introduced, charges were scaled, and Lennard-Jones (LJ) terms
 # were scaled in the restrain, discharge, and vanish stages, respectively
 
@@ -41,12 +41,12 @@ class Stage(SimulationRunner):
         leg_type: LegType,
         mdp_template: str,
         run_script_template: str,
-    ):
+    ) -> None:
 
-        # we’ll override dirs later in Leg.setup()
+        # we`ll override dirs later in Leg.setup()
         super().__init__(input_dir="", output_dir="", ensemble_size=ensemble_size)
         self.stage_type = stage_type
-        # e.g. lam_list = [0.0, 0.1, ...]  – here just indices
+        # e.g. lam_list = [0.0, 0.1, ...]  - here just indices
         self.lam_list = list(range(num_lambdas))
         self.mdp_template = Path(mdp_template)
         self.run_script_template = Path(run_script_template)
@@ -66,8 +66,8 @@ class Stage(SimulationRunner):
                 run_dir = lam_dir / f"run_{run}"
                 run_dir.mkdir(parents=True, exist_ok=True)
 
-                # symlink exactly the per‐run equilibration & restraint files
-                # assume self.input_dir still points at the stage‐level "input/" folder
+                # symlink exactly the per-run equilibration & restraint files
+                # assume self.input_dir still points at the stage-level "input/" folder
                 stage_in = Path(self.input_dir)
                 suffix = PreparationStage.EQUILIBRATED.file_suffix
                 gro_src = stage_in / f"{self.leg_type.name}{suffix}_{run}_final.gro"
@@ -80,7 +80,7 @@ class Stage(SimulationRunner):
                             f"Expected {src} for λ={lam}, run={run}"
                         )
 
-                    # If there's already something here, remove it so we can re‐link:
+                    # If there's already something here, remove it so we can re-link:
                     dest = run_dir / src.name
                     if dest.exists() or dest.is_symlink():
                         dest.unlink()
@@ -135,7 +135,8 @@ class Leg(SimulationRunner):
         for prep_stage in PreparationStage:
             required_input_files[leg_type][prep_stage] = [
                 "run_gmx.sh",
-            ] + prep_stage.get_simulation_input_files(leg_type)
+                *prep_stage.get_simulation_input_files(leg_type),
+            ]
 
     required_stages: dict[LegType, list[StageType]] = {
         LegType.BOUND: [StageType.RESTRAIN, StageType.DISCHARGE, StageType.VANISH],
@@ -149,7 +150,7 @@ class Leg(SimulationRunner):
         input_dir: str,
         output_dir: str,
         ensemble_size: int,
-    ):
+    ) -> None:
         super().__init__(input_dir, output_dir, ensemble_size=5)
         self.leg_type = leg_type
         self.stages = stages
@@ -179,7 +180,7 @@ class Leg(SimulationRunner):
                     raise FileNotFoundError(f"Cannot find required input file {fn}")
                 shutil.copy(src, stage_input)
 
-            # 3) copy in the N ensemble‐equilibrated gro/top, plus restraints if bound
+            # 3) copy in the N ensemble-equilibrated gro/top, plus restraints if bound
             suffix = PreparationStage.EQUILIBRATED.file_suffix
             for i in range(1, self.ensemble_size + 1):
                 for ext in (".gro", ".top"):
@@ -192,7 +193,7 @@ class Leg(SimulationRunner):
             shutil.copy(src_root / "lambda.gmx.mdp", stage_input)
             shutil.copy(src_root / "run_gmx.sh", stage_input)
 
-            # 5) now delegate into the Stage.setup() to build per‐lambda/run dirs
+            # 5) now delegate into the Stage.setup() to build per-lambda/run dirs
             stage.input_dir = str(stage_input)
             stage.output_dir = str(stage_output)
             stage.leg_type = self.leg_type
@@ -219,7 +220,7 @@ class LambdaWindow(SimulationRunner):
         output_dir: str,
         sim_params: dict,
         run_index=1,
-    ):
+    ) -> None:
         super().__init__(input_dir, output_dir, ensemble_size=1)
         self.lam_state = lam_state
         self.run_index = run_index
