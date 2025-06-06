@@ -1,5 +1,6 @@
 import logging
 import pathlib
+import threading
 from abc import ABC
 from itertools import count
 from pathlib import Path
@@ -82,7 +83,9 @@ class SimulationRunner(ABC):
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.setup()
 
-    def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
+    def run(
+        self, run_nos: Optional[list[int]] = None, *args, **kwargs
+    ) -> Optional[threading.Thread]:
         """
         Recursively run all sub-runners. Subclasses can override to insert custom logic
         before/after sub-runners are launched.
@@ -92,6 +95,7 @@ class SimulationRunner(ABC):
         logger.info(f"Running run numbers {run_nos} for {self.__class__.__name__}...")
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.run(run_nos, *args, **kwargs)
+        return None
 
     def kill(self) -> None:
         """Kill all running simulations and jobs."""

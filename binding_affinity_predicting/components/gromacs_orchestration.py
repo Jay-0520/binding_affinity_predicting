@@ -629,9 +629,11 @@ class Calculation(SimulationRunner):
         runtime : float, Optional, default: None
             If adaptive is False, runtime must be supplied and stage will run for this
             number of nanoseconds.
-        hpc : bool
+        use_hpc : bool
             If True, submit all windows` `submit_gmx.sh` to SLURM (nonblocking).
             If False, run everything locally (blocking).
+        run_sync :
+        adaptive :
         """
         if not getattr(self, "setup_complete", False):
             raise ValueError("Calculation has not been set up yet. Call setup() first.")
@@ -650,7 +652,7 @@ class Calculation(SimulationRunner):
             # run locally (blocking)
             if run_sync:
                 self._run_local(run_nos=run_nos)
-                return
+                return None
             # now run locally AND asynchronously (non-blocking)
             else:
 
