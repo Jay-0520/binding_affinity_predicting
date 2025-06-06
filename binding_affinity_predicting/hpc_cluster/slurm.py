@@ -27,7 +27,7 @@ def run_slurm(
     sys_prep_fn : Callable[..., None]
         The system_prep function, e.g. minimise_input or heat_and_preequil_input.
     wait : bool
-        If True, block until *all* virtual‐queued jobs (not just this one) have finished.
+        If True, block until *all* virtual-queued jobs (not just this one) have finished.
     run_dir : str
         Directory where 'run_somd.sh' (SLURM header) lives and where we write *.sh.
     job_name : str
@@ -55,7 +55,7 @@ def run_slurm(
 
     # 2) Append Python call
     arglist = ", ".join([repr(arg) for arg in fn_args])
-    kwarglist = ", ".join([f"{k}={repr(v)}" for k, v in fn_kwargs.items()])
+    kwarglist = ", ".join([f"{k}={v!r}" for k, v in fn_kwargs.items()])
     all_args = ", ".join([x for x in (arglist, kwarglist) if x])
     header_lines.append(
         f"\npython -c 'from {sys_prep_fn.__module__} import {sys_prep_fn.__name__}; "
@@ -83,7 +83,7 @@ def run_slurm(
 
     # 6) Always wait untit the job is submitted to the real slurm queue
     while virtual_queue._pre_queue:
-        logger.debug("Waiting for all pre‐queued jobs to be pushed to SLURM…")
+        logger.debug("Waiting for all pre-queued jobs to be pushed to SLURM…")
         sleep(5 * 60)
         virtual_queue.update()
 

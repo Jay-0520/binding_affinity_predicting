@@ -1,13 +1,5 @@
-import copy
 import logging
-import os
-import pathlib
-import pickle
-import subprocess
-from abc import ABC
-from itertools import count
-from time import sleep
-from typing import Any, Optional, Tuple, Union
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -29,7 +21,7 @@ logger = logging.getLogger(__name__)
 #     Returns
 #     -------
 #     results : dict
-#         A dict mapping each sub-runner’s name (str(runner)) to the dict
+#         A dict mapping each sub-runner`s name (str(runner)) to the dict
 #         that runner.get_results() returns.
 #     """
 #     run_nos = self._get_valid_run_nos(run_nos)
@@ -52,7 +44,7 @@ def get_simulation_results() -> None:
 
 
 class SimulationAnalyzer:
-    def __init__(self, sim_runners: list[SimulationRunner], output_dir: str):
+    def __init__(self, sim_runners: list[SimulationRunner], output_dir: str) -> None:
         """
         Abstract base class for simulation analysis.
         Handles only simulation analysis (orchestration, file management, running jobs, etc).
@@ -66,7 +58,7 @@ class SimulationAnalyzer:
         self.sim_runners = sim_runners
         self.output_dir = output_dir
 
-    def _check_simulation_status():
+    def _check_simulation_status() -> None:
         """
         check if all simulations being analysis actually completed running
         and none of them have failed
@@ -118,7 +110,8 @@ class SimulationAnalyzer:
         dg_overall = np.zeros(len(run_nos))
         er_overall = np.zeros(len(run_nos))
 
-        # Make sure that simulations are all complete and check that none of the simulations have failed
+        # Make sure that simulations are all complete and check that none of
+        # the simulations have failed
         self._check_simulation_status()
 
         # Analyse the sub-simulation runners
@@ -155,17 +148,17 @@ class SimulationAnalyzer:
         # Write overall MBAR stats to file
         with open(f"{self.output_dir}/overall_stats.dat", "a") as ofile:
             ofile.write(
-                "###################################### Free Energies ########################################\n"
+                "###################################### Free Energies ########################################\n"  # noqa
             )
             ofile.write(
                 f"Mean free energy: {mean_free_energy: .3f} + /- {conf_int:.3f} kcal/mol\n"
             )
             for i in range(self.ensemble_size):
                 ofile.write(
-                    f"Free energy from run {i + 1}: {dg_overall[i]: .3f} +/- {er_overall[i]:.3f} kcal/mol\n"
+                    f"Free energy from run {i + 1}: {dg_overall[i]: .3f} +/- {er_overall[i]:.3f} kcal/mol\n"  # noqa
                 )
             ofile.write(
-                "Errors are 95 % C.I.s based on the assumption of a Gaussian distribution of free energies\n"
+                "Errors are 95 % C.I.s based on the assumption of a Gaussian distribution of free energies\n"  # noqa
             )
 
         # Update internal state with result
@@ -214,12 +207,12 @@ class SimulationAnalyzer:
             dgs = self._delta_g
             ers = self._delta_g_er
         except AttributeError:
-            raise _AnalysisError(
-                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."
+            raise (
+                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."  # noqa
             )
         if dgs is None or ers is None:
-            raise _AnalysisError(
-                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."
+            raise (
+                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."  # noqa
             )
 
         # Calculate the 95 % confidence interval assuming Gaussian errors

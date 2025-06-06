@@ -3,13 +3,11 @@
 import getpass as _getpass
 import glob as _glob
 import logging
-import logging as _logging
 import os as _os
-import subprocess as _subprocess
+import subprocess
 from dataclasses import dataclass
-from time import sleep as _sleep
-from typing import List as _List
-from typing import Optional as _Optional
+from time import sleep
+from typing import Optional
 
 from binding_affinity_predicting.data.enums import JobStatus
 from binding_affinity_predicting.hpc_cluster.utils import retry
@@ -23,14 +21,14 @@ class Job:
     """Class to hold information about a job"""
 
     virtual_job_id: int
-    command_list: _List[str]
-    slurm_job_id: _Optional[int] = None
+    command_list: list[str]
+    slurm_job_id: Optional[int] = None
     status: JobStatus = JobStatus.NONE  # type: ignore
-    slurm_file_base: _Optional[str] = None
+    slurm_file_base: Optional[str] = None
 
     def __str__(self) -> str:
         # Avoid printing the command, which may be long
-        return f"Job (virtual_job_id = {self.virtual_job_id}, slurm_job_id= {self.slurm_job_id}), status = {self.status}"
+        return f"Job (virtual_job_id = {self.virtual_job_id}, slurm_job_id= {self.slurm_job_id}), status = {self.status}"  # noqa
 
     @property
     def slurm_outfile(self) -> str:
@@ -86,8 +84,8 @@ class VirtualQueue:
         -------
         None
         """
-        self._slurm_queue: _List[Job] = []
-        self._pre_queue: _List[Job] = []
+        self._slurm_queue: list[Job] = []
+        self._pre_queue: list[Job] = []
         self._available_virt_job_id = 0
         self.queue_len_lim = queue_len_lim
         self.log_dir = log_dir
@@ -104,7 +102,7 @@ class VirtualQueue:
         # Virtual queues didn't use to have the ._stream_log_level attribute. This
         # code ensures backwards compatibility.
         if not hasattr(self, "_stream_log_level"):
-            self._stream_log_level = _logging.INFO
+            self._stream_log_level = logging.INFO
         # If logging has already been set up, remove it
         if hasattr(self, "_logger"):
             handlers = self._logger.handlers[:]
@@ -112,15 +110,15 @@ class VirtualQueue:
                 self._logger.removeHandler(handler)
                 handler.close()
             del self._logger
-        self._logger = _logging.getLogger(str(self))
-        self._logger.setLevel(_logging.DEBUG)
+        self._logger = logging.getLogger(str(self))
+        self._logger.setLevel(logging.DEBUG)
         self._logger.propagate = False
         # For the file handler, we want to log everything
-        file_handler = _logging.FileHandler(f"{self.log_dir}/virtual_queue.log")
+        file_handler = logging.FileHandler(f"{self.log_dir}/virtual_queue.log")
         # file_handler.setFormatter(_A3feFileFormatter())
-        file_handler.setLevel(_logging.DEBUG)
+        file_handler.setLevel(logging.DEBUG)
         # For the stream handler, we want to log at the user-specified level
-        stream_handler = _logging.StreamHandler()
+        stream_handler = logging.StreamHandler()
         # stream_handler.setFormatter(_A3feStreamFormatter())
         stream_handler.setLevel(self._stream_log_level)
         # Add the handlers to the logger
@@ -128,14 +126,14 @@ class VirtualQueue:
         self._logger.addHandler(stream_handler)
 
     @property
-    def queue(self) -> _List[Job]:
+    def queue(self) -> list[Job]:
         """The queue of jobs, both real and virtual."""
         return self._slurm_queue + self._pre_queue
 
     def __str__(self) -> str:
         return self.__class__.__name__
 
-    def submit(self, command_list: _List[str], slurm_file_base: str) -> Job:
+    def submit(self, command_list: list[str], slurm_file_base: str) -> Job:
         """
         Submit a job to the virtual queue.
 
@@ -169,12 +167,12 @@ class VirtualQueue:
         # If the job is in the real queue, kill it
         if job in self._slurm_queue:
             self._slurm_queue.remove(job)
-            _subprocess.run(["scancel", str(job.slurm_job_id)])
+            subprocess.run(["scancel", str(job.slurm_job_id)])
         else:  # Job is in the pre-queue
             self._pre_queue.remove(job)
         job.status = JobStatus.KILLED  # type: ignore
 
-    def _read_slurm_queue(self) -> _List[int]:
+    def _read_slurm_queue(self) -> list[int]:
         """
         Extract all running slurm job IDs from the SLURM
         queue.
@@ -189,7 +187,7 @@ class VirtualQueue:
         # busy (e.g. 'slurm_load_jobs error: Socket timed out on send/recv operation'),
         # so retry a few times, waiting a while in between
         @retry(times=5, exceptions=(ValueError), wait_time=120, logger=self._logger)
-        def _read_slurm_queue_inner() -> _List[int]:
+        def _read_slurm_queue_inner() -> list[int]:
             """This inner function is defined so that we can pass self._logger
             to the decorator"""
             # Get job ids of currently running jobs. This assumes no array jobs.
@@ -202,12 +200,12 @@ class VirtualQueue:
             ]
 
             # Create a pipe for the first command
-            process = _subprocess.Popen(commands[0], stdout=_subprocess.PIPE)
+            process = subprocess.Popen(commands[0], stdout=subprocess.PIPE)
 
             # Chain the commands
             for cmd in commands[1:]:
-                process = _subprocess.Popen(
-                    cmd, stdin=process.stdout, stdout=_subprocess.PIPE
+                process = subprocess.Popen(
+                    cmd, stdin=process.stdout, stdout=subprocess.PIPE
                 )
 
             # Get the output
@@ -222,7 +220,7 @@ class VirtualQueue:
 
         return _read_slurm_queue_inner()
 
-    def _submit_job(self, job_command_list: _List[str]) -> int:
+    def _submit_job(self, job_command_list: list[str]) -> int:
         """
         Submit the supplied command to slurm using sbatch.
 
@@ -244,13 +242,13 @@ class VirtualQueue:
             wait_time=5,
             logger=self._logger,
         )
-        def _submit_job_inner(job_command_list: _List[str]) -> int:
-            cmds = ["sbatch"] + job_command_list
-            process = _subprocess.Popen(
+        def _submit_job_inner(job_command_list: list[str]) -> int:
+            cmds = ["sbatch", *job_command_list]
+            process = subprocess.Popen(
                 cmds,
-                stdin=_subprocess.PIPE,
-                stdout=_subprocess.PIPE,
-                stderr=_subprocess.STDOUT,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 close_fds=True,
             )
             if process.stdout is None:
@@ -297,11 +295,6 @@ class VirtualQueue:
             for job in jobs_to_move:
                 job.slurm_job_id = self._submit_job(job.command_list)
 
-        # self._logger.info(f"Queue updated")
-        # self._logger.info(f"Slurm queue slurm job ids: {[job.slurm_job_id for job in self._slurm_queue]}")
-        # self._logger.info(f"Slurm queue virtual job ids: {[job.virtual_job_id for job in self._slurm_queue]}")
-        # self._logger.info(f"Pre-queue virtual job ids: {[job.virtual_job_id for job in self._pre_queue]}")
-
     def _update_log(self) -> None:
         """Update the log file with the current status of the queue."""
         self._logger.debug("##############################################")
@@ -313,7 +306,7 @@ class VirtualQueue:
         """Wait for all jobs to finish."""
         while len(self.queue) > 0:
             self.update()
-            _sleep(30)
+            sleep(30)
 
     def _flush(self) -> None:
         """Remove all the jobs from the queu, regardless of status."""

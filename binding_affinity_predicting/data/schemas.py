@@ -298,8 +298,8 @@ class GromacsFepSimulationConfig(BaseModel):
         TODO: double check if this is always true for GROMACS
         """
         bonded = model.bonded_lambdas
-        coul   = model.coul_lambdas
-        vdw    = model.vdw_lambdas
+        coul = model.coul_lambdas
+        vdw = model.vdw_lambdas
 
         # 1) Ensure exactly one key in bonded_lambdas and it is BOUND
         if set(bonded.keys()) != {LegType.BOUND}:
@@ -337,7 +337,7 @@ class GromacsFepSimulationConfig(BaseModel):
 
 class SomdFepSimulationConfig(BaseModel):
     """
-    Configuration for the λ‐schedule used in bound and free legs.
+    Configuration for the λ-schedule used in bound and free legs.
     """
 
     lambda_values: dict[LegType, dict[StageType, list[float]]] = Field(
@@ -465,7 +465,7 @@ class EnsembleEquilibrationConfig(BaseModel):
     @model_validator(mode="before")
     def _fill_in_replicas(cls, values):
         n = values.get("num_replicas", 5)
-        # only populate if they didn’t explicitly supply any replicas
+        # only populate if they didn`t explicitly supply any replicas
         if values.get("replicas") is None:
             values["replicas"] = [
                 EnsembleEquilibrationReplicaConfig() for _ in range(n)

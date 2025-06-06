@@ -19,7 +19,7 @@ def stub_parameterise_and_save(monkeypatch):
 
     # Fake parameterise: just return the same molecule in a trivial wrapper
     class FakeProcess:
-        def __init__(self, mol, **kwargs):
+        def __init__(self, mol, **kwargs) -> None:
             self._mol = mol
 
         def getMolecule(self):
@@ -62,7 +62,7 @@ def test_parameterise_system_real_io(example_structures, out_dir):
         output_dir=str(out_dir),
     )
 
-    # Now assert the GROMACS files are there and non‐empty:
+    # Now assert the GROMACS files are there and non-empty:
     gro = out_dir / "combo.gro"
     top = out_dir / "combo.top"
     assert gro.exists() and gro.stat().st_size > 0, f"{gro} was not created or is empty"
@@ -77,7 +77,7 @@ def test_parameterise_system_raises_if_no_paths():
 def test_parameterise_water_only_io(example_structures, out_dir):
     wat = str(example_structures / "water.pdb")
     _parameterise_water(file_path=wat, filename_stem="water", output_dir=str(out_dir))
-    # Now assert the GROMACS files are there and non‐empty:
+    # Now assert the GROMACS files are there and non-empty:
     gro = out_dir / "water.gro"
     top = out_dir / "water.top"
     assert gro.exists() and gro.stat().st_size > 0, f"{gro} was not created or is empty"

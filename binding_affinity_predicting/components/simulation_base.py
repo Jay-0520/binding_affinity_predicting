@@ -1,5 +1,6 @@
 import logging
 import pathlib
+import threading
 from abc import ABC
 from itertools import count
 from pathlib import Path
@@ -82,7 +83,9 @@ class SimulationRunner(ABC):
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.setup()
 
-    def run(self, run_nos: Optional[list[int]] = None, *args, **kwargs) -> None:
+    def run(
+        self, run_nos: Optional[list[int]] = None, *args, **kwargs
+    ) -> Optional[threading.Thread]:
         """
         Recursively run all sub-runners. Subclasses can override to insert custom logic
         before/after sub-runners are launched.
@@ -92,6 +95,7 @@ class SimulationRunner(ABC):
         logger.info(f"Running run numbers {run_nos} for {self.__class__.__name__}...")
         for sub_sim_runner in self._sub_sim_runners:
             sub_sim_runner.run(run_nos, *args, **kwargs)
+        return None
 
     def kill(self) -> None:
         """Kill all running simulations and jobs."""
@@ -154,7 +158,7 @@ class SimulationRunner(ABC):
                 # Otherwise, at least one job is still pending/running
                 self._running = True
         else:
-            # --- Local branch: look at each SimulationRunner’s flags ---
+            # --- Local branch: look at each SimulationRunner`s flags ---
             if self._sub_sim_runners:
                 if any(getattr(sub, "_failed", False) for sub in self._sub_sim_runners):
                     self._failed = True
@@ -187,7 +191,7 @@ class SimulationRunner(ABC):
         self._update_status()
 
         # first check our own status
-        if hasattr(self, '_running') and self._running:
+        if hasattr(self, "_running") and self._running:
             return True
 
         # check sub-runners; if there are child runners
@@ -202,9 +206,9 @@ class SimulationRunner(ABC):
         """True if all sub-runners are finished and none failed."""
         self._update_status()
 
-        # if there are no children, simply look at this runner’s own _finished attribute
+        # if there are no children, simply look at this runner`s own _finished attribute
         if not self._sub_sim_runners:
-            return getattr(self, '_finished', False)
+            return getattr(self, "_finished", False)
 
         return (
             all(getattr(sub, "finished", False) for sub in self._sub_sim_runners)
@@ -217,7 +221,7 @@ class SimulationRunner(ABC):
         self._update_status()
 
         # Check our own status first
-        if hasattr(self, '_failed') and self._failed:
+        if hasattr(self, "_failed") and self._failed:
             return True
 
         # Then check sub-runners
@@ -234,7 +238,7 @@ class SimulationRunner(ABC):
         result = []
 
         # Add ourselves if we failed
-        if hasattr(self, '_failed') and self._failed:
+        if hasattr(self, "_failed") and self._failed:
             result.append(self)
 
         # Recursively check sub-runners

@@ -180,7 +180,7 @@ class MDPParameters(BaseModel):
         default_factory=dict, description="Additional custom parameters"
     )
 
-    @field_validator('bonded_lambdas', 'coul_lambdas', 'vdw_lambdas')
+    @field_validator("bonded_lambdas", "coul_lambdas", "vdw_lambdas")
     def validate_lambda_values(cls, v: list[float]) -> list[float]:
         """Validate that lambda values are between 0 and 1."""
         for val in v:
@@ -196,7 +196,7 @@ class MDPParameters(BaseModel):
         coul = model.coul_lambdas
         vdw = model.vdw_lambdas
 
-        # All three lists must have the same length (if they’re nonempty)
+        # All three lists must have the same length (if they`re nonempty)
         if bonded and coul and vdw:
             lengths = {len(bonded), len(coul), len(vdw)}
             if len(lengths) != 1:
@@ -215,7 +215,7 @@ class MDPParameters(BaseModel):
 
         return model
 
-    @field_validator('integrator')
+    @field_validator("integrator")
     def validate_integrator(cls, v: str) -> str:
         """Validate integrator choice."""
         valid_integrators = ["md", "sd", "steep", "cg", "l-bfgs"]
@@ -243,7 +243,7 @@ class MDPParameters(BaseModel):
 class MDPGenerator:
     """Generates GROMACS MDP files for ABFE calculations"""
 
-    def __init__(self, base_params: Optional[MDPParameters] = None):
+    def __init__(self, base_params: Optional[MDPParameters] = None) -> None:
         """
         Initialize MDP generator.
 

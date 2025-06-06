@@ -2,22 +2,24 @@
 gromacs_orchestration.py
 
 Functionality for setting up and running an entire ABFE calculation using GROMACS,
-consisting of two legs (bound and unbound) and multiple lambda‐windows per leg.
+consisting of two legs (bound and unbound) and multiple lambda-windows per leg.
 In GROMACS, all three alchemical stages (RESTRAIN → DISCHARGE → VANISH) are encoded
-in a single MDP file via bonded‐, coulomb‐, and vdw‐lambda vectors, so we do not
+in a single MDP file via bonded-, coulomb-, and vdw-lambda vectors, so we do not
 instantly split into separate Stage objects. Instead, each lambda window is its own
-sub‐runner and drives GROMACS with a different `init‐lambda‐state`.
+sub-runner and drives GROMACS with a different `init-lambda-state`.
 """
 
 import logging
 import os
 import shutil
+import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from binding_affinity_predicting.components.simulation import Simulation
 from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.data.enums import LegType, PreparationStage
+from binding_affinity_predicting.data.enums import JobStatus, LegType, PreparationStage
 from binding_affinity_predicting.data.schemas import (
     GromacsFepSimulationConfig,
 )
@@ -48,7 +50,7 @@ class LambdaWindow(SimulationRunner):
         virtual_queue: Optional[VirtualQueue] = None,
         mdp_generator: Optional[MDPGenerator] = None,
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
-    ):
+    ) -> None:
         super().__init__(
             input_dir=input_dir, output_dir=work_dir, ensemble_size=ensemble_size
         )
@@ -92,9 +94,6 @@ class LambdaWindow(SimulationRunner):
             gro_file, top_file = self._prepare_run_specific_files(
                 run_no, individual_run_dir
             )
-
-            # Generate MDP file for this run using Pydantic generator
-            # self._generate_mdp_file(individual_run_dir, run_no)
 
             # Create simulation object with Pydantic generators
             sim = Simulation(
@@ -211,21 +210,22 @@ class LambdaWindow(SimulationRunner):
                 raise ValueError(
                     f"Invalid run number {run_no}. Must be in [1..{self.ensemble_size}]."
                 )
+            sim_index = run_no - 1
+            sim = self._sub_sim_runners[sim_index]
+            sim._submitted_via_hpc = True
+            sim.job_status = JobStatus.QUEUED  # It's queued in SLURM
 
             # Build SLURM submission command
             run_dir = Path(self.output_dir) / f"run_{run_no}"
             submit_script = run_dir / "submit_gmx.sh"
-
             # Prepare the command list for sbatch
             command_list = [str(submit_script)]
             if runtime is not None:
                 command_list.extend(["--runtime", str(runtime)])
-
             # Set up SLURM output file base
             slurm_file_base = str(
                 run_dir / f"slurm_lambda_{self.lam_state}_run_{run_no}"
             )
-
             # Submit to virtual queue
             job: Job = self.virtual_queue.submit(
                 command_list=command_list, slurm_file_base=slurm_file_base
@@ -236,6 +236,38 @@ class LambdaWindow(SimulationRunner):
                 f"Submitted lambda {self.lam_state}, run {run_no} to "
                 f"SLURM (job ID: {job.virtual_job_id})"
             )
+
+    def update_simulation_statuses(self) -> None:
+        """
+        Update simulation statuses based on VirtualQueue job statuses.
+        Call this periodically to sync HPC job status with simulation status.
+        """
+        if not self._submitted_jobs:
+            return
+
+        for i, job in enumerate(self._submitted_jobs):
+            if i < len(self._sub_sim_runners):
+                sim = self._sub_sim_runners[i]
+
+                # Update simulation status based on job status
+                if hasattr(job, "status"):
+                    if job.status == "FINISHED":
+                        sim._finished = True
+                        sim.job_status = JobStatus.FINISHED
+                        if sim.end_time is None:
+                            sim.end_time = datetime.now()
+                    elif job.status == "FAILED":
+                        sim._failed = True
+                        sim.job_status = JobStatus.FAILED
+                        if sim.end_time is None:
+                            sim.end_time = datetime.now()
+                    elif job.status == "RUNNING":
+                        sim._running = True
+                        sim.job_status = JobStatus.RUNNING
+                        if sim.start_time is None:
+                            sim.start_time = datetime.now()
+                    elif job.status == "QUEUED":
+                        sim.job_status = JobStatus.QUEUED
 
     def __str__(self) -> str:
         """
@@ -269,7 +301,7 @@ class Leg(SimulationRunner):
         virtual_queue: Optional[VirtualQueue] = None,
         mdp_generator: Optional[MDPGenerator] = None,
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
-    ):
+    ) -> None:
         super().__init__(
             input_dir=input_dir,
             output_dir=output_dir,
@@ -287,12 +319,12 @@ class Leg(SimulationRunner):
 
     def _create_default_mdp_generator(self) -> MDPGenerator:
         """Create default MDP generator with parameters from sim_config."""
-        mdp_overrides = getattr(self.sim_config, 'mdp_overrides', {})
+        mdp_overrides = getattr(self.sim_config, "mdp_overrides", {})
         return create_custom_mdp_generator(**mdp_overrides)
 
     def _create_default_slurm_generator(self) -> SlurmSubmitGenerator:
         """Create default SLURM generator with parameters from sim_config."""
-        slurm_overrides = getattr(self.sim_config, 'slurm_overrides', {})
+        slurm_overrides = getattr(self.sim_config, "slurm_overrides", {})
         return create_custom_slurm_generator(**slurm_overrides)
 
     def setup(self) -> None:
@@ -310,7 +342,7 @@ class Leg(SimulationRunner):
         leg_input = leg_base / "input"
         leg_input.mkdir(exist_ok=True)
 
-        # 2) Copy pre‐equilibrated .gro/.top/.itp into leg_input
+        # 2) Copy pre-equilibrated .gro/.top/.itp into leg_input
         self._copy_equilibrated_files(leg_input)
 
         # 3) For each λ index and each replicate, make run dirs & symlink inputs
@@ -321,7 +353,7 @@ class Leg(SimulationRunner):
 
     def _copy_equilibrated_files(self, leg_input: Path) -> None:
         """
-        Copy all pre‐equilibrated .gro/.top (plus .itp for BOUND) from
+        Copy all pre-equilibrated .gro/.top (plus .itp for BOUND) from
         `input_dir/equilibration/` into `leg_input/`.
         """
         suffix = PreparationStage.EQUILIBRATED.file_suffix
@@ -406,7 +438,7 @@ class Leg(SimulationRunner):
 
             # Prepare sim_params for this lambda window
             sim_params = {
-                "gmx_exe": getattr(self.sim_config, 'gmx_exe', 'gmx'),
+                "gmx_exe": getattr(self.sim_config, "gmx_exe", "gmx"),
                 "gro_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.gro",
                 "top_file_template": f"{self.leg_type.name.lower()}{suffix}_{{run_idx}}_final.top",
                 "extra_params": {"lambda_float": λ_float},
@@ -414,12 +446,12 @@ class Leg(SimulationRunner):
                 "coul_list": coul_full,
                 "vdw_list": vdw_full,
                 # Add parameters from sim_config
-                "runtime_ns": getattr(self.sim_config, 'runtime_ns', None),
-                "mdp_overrides": getattr(self.sim_config, 'mdp_overrides', {}),
-                "slurm_overrides": getattr(self.sim_config, 'slurm_overrides', {}),
-                "modules_to_load": getattr(self.sim_config, 'modules_to_load', []),
-                "pre_commands": getattr(self.sim_config, 'pre_commands', []),
-                "post_commands": getattr(self.sim_config, 'post_commands', []),
+                "runtime_ns": getattr(self.sim_config, "runtime_ns", None),
+                "mdp_overrides": getattr(self.sim_config, "mdp_overrides", {}),
+                "slurm_overrides": getattr(self.sim_config, "slurm_overrides", {}),
+                "modules_to_load": getattr(self.sim_config, "modules_to_load", []),
+                "pre_commands": getattr(self.sim_config, "pre_commands", []),
+                "post_commands": getattr(self.sim_config, "post_commands", []),
             }
 
             window = LambdaWindow(
@@ -535,12 +567,12 @@ class Calculation(SimulationRunner):
 
     def _create_default_mdp_generator(self) -> MDPGenerator:
         """Create default MDP generator from sim_config."""
-        mdp_overrides = getattr(self.sim_config, 'mdp_overrides', {})
+        mdp_overrides = getattr(self.sim_config, "mdp_overrides", {})
         return create_custom_mdp_generator(**mdp_overrides)
 
     def _create_default_slurm_generator(self) -> SlurmSubmitGenerator:
         """Create default SLURM generator from sim_config."""
-        slurm_overrides = getattr(self.sim_config, 'slurm_overrides', {})
+        slurm_overrides = getattr(self.sim_config, "slurm_overrides", {})
         return create_custom_slurm_generator(**slurm_overrides)
 
     def setup(self) -> None:
@@ -583,9 +615,12 @@ class Calculation(SimulationRunner):
         adaptive: bool = False,
         runtime: Optional[float] = None,
         use_hpc: bool = True,
-    ) -> None:
+        run_sync: bool = True,
+    ) -> Optional[threading.Thread]:
         """
         Run the entire ABFE calculation, either locally or via SLURM.
+
+        if runs locally, run asynchronously
 
         Parameters
         ----------
@@ -594,22 +629,44 @@ class Calculation(SimulationRunner):
         runtime : float, Optional, default: None
             If adaptive is False, runtime must be supplied and stage will run for this
             number of nanoseconds.
-        hpc : bool
-            If True, submit all windows’ `submit_gmx.sh` to SLURM (nonblocking).
+        use_hpc : bool
+            If True, submit all windows` `submit_gmx.sh` to SLURM (nonblocking).
             If False, run everything locally (blocking).
+        run_sync :
+        adaptive :
         """
         if not getattr(self, "setup_complete", False):
             raise ValueError("Calculation has not been set up yet. Call setup() first.")
 
         run_nos = self._get_valid_run_nos(run_nos)
 
+        # Track execution mode for status checking
+        self._last_run_used_hpc = use_hpc
+
         logger.info(f"Starting ABFE calculation with {len(self._sub_sim_runners)} legs")
 
         if use_hpc:
             self._run_hpc(run_nos=run_nos, runtime=runtime)
+            return None
         else:
-            # Run locally (blocking)
-            self._run_local(run_nos=run_nos)
+            # run locally (blocking)
+            if run_sync:
+                self._run_local(run_nos=run_nos)
+                return None
+            # now run locally AND asynchronously (non-blocking)
+            else:
+
+                def run_in_thread():
+                    self.run(
+                        run_nos=run_nos,
+                        adaptive=adaptive,
+                        runtime=runtime,
+                        use_hpc=False,
+                    )
+
+                thread = threading.Thread(target=run_in_thread, daemon=True)
+                thread.start()
+                return thread
 
     def _run_local(
         self,
@@ -633,45 +690,3 @@ class Calculation(SimulationRunner):
         """Clean simulation files from all legs"""
         for leg in self._sub_sim_runners:
             leg.clean_simulations(clean_logs=clean_logs)
-
-    def get_simulation_status(self) -> dict[str, Any]:
-        """Get detailed status of all simulations."""
-        status: dict[str, Any] = {
-            "total_simulations": 0,
-            "finished": 0,
-            "failed": 0,
-            "running": 0,
-            "legs": {},
-        }
-
-        for leg in self._sub_sim_runners:
-            leg_status: dict[str, Any] = {
-                "lambda_windows": len(leg._sub_sim_runners),
-                "windows": {},
-            }
-
-            for window in leg._sub_sim_runners:
-                window_status = {
-                    "simulations": len(window._sub_sim_runners),
-                    "finished": 0,
-                    "failed": 0,
-                    "running": 0,
-                }
-
-                for sim in window._sub_sim_runners:
-                    status["total_simulations"] += 1
-                    if sim.finished:
-                        status["finished"] += 1
-                        window_status["finished"] += 1
-                    elif sim.failed:
-                        status["failed"] += 1
-                        window_status["failed"] += 1
-                    elif sim.running:
-                        status["running"] += 1
-                        window_status["running"] += 1
-
-                leg_status["windows"][f"lambda_{window.lam_state}"] = window_status
-
-            status["legs"][leg.leg_type.name.lower()] = leg_status
-
-        return status

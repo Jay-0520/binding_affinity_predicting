@@ -104,9 +104,9 @@ def move_link_or_copy_files(
     Raises
     ------
     ValueError
-        If `src_dir` doesn’t exist or isn’t a directory.
+        If `src_dir` doesn`t exist or isn`t a directory.
     FileNotFoundError
-        If a requested filename isn’t found under `src_dir`.
+        If a requested filename isn`t found under `src_dir`.
     """
     src = Path(src_dir)
     if not src.is_dir():

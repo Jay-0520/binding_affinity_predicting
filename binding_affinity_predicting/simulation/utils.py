@@ -1,10 +1,9 @@
 import logging
 import os
-import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 from BioSimSpace.Sandpit.Exscientia._SireWrappers import Molecule  # type: ignore[import]
@@ -133,7 +132,7 @@ def decouple_ligand_in_system(
     ligand_resname
         The residue name to look for first (e.g. "LIG").
     min_atoms, max_atoms
-        Fallback atom‐count heuristic if no molecule is named ligand_resname.
+        Fallback atom-count heuristic if no molecule is named ligand_resname.
 
     Returns
     -------
@@ -143,7 +142,7 @@ def decouple_ligand_in_system(
     n_mols = system.nMolecules()
     ligand_idx = None
 
-    # try explicit residue‐name match
+    # try explicit residue-name match
     for i in range(n_mols):
         mol = system[i]
         try:
@@ -166,7 +165,7 @@ def decouple_ligand_in_system(
     if ligand_idx is None:
         raise ValueError(
             f"Could not identify ligand: no residue named '{ligand_resname}' "
-            f"and no molecule in {min_atoms}–{max_atoms} atoms."
+            f"and no molecule in {min_atoms}-{max_atoms} atoms."
         )
 
     # try decoupling, but skip if already decoupled
