@@ -208,11 +208,11 @@ class SimulationAnalyzer:
             ers = self._delta_g_er
         except AttributeError:
             raise (
-                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."
+                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."  # noqa
             )
         if dgs is None or ers is None:
             raise (
-                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."
+                f"Analysis has not been performed for {self.__class__.__name__}. Please call analyse() first."  # noqa
             )
 
         # Calculate the 95 % confidence interval assuming Gaussian errors

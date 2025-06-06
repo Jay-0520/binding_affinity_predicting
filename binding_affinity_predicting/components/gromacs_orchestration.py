@@ -95,9 +95,6 @@ class LambdaWindow(SimulationRunner):
                 run_no, individual_run_dir
             )
 
-            # Generate MDP file for this run using Pydantic generator
-            # self._generate_mdp_file(individual_run_dir, run_no)
-
             # Create simulation object with Pydantic generators
             sim = Simulation(
                 lam_state=self.lam_state,

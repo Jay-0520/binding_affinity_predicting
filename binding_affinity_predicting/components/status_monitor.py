@@ -142,8 +142,7 @@ class StatusMonitor:
                             return JobStatus.FAILED
 
         # If it`s not running, not finished, not failed, and no files exist
-        # → maybe it`s just QUEUED.
-        # check: was the MDP file created?  If so, we treat it as “QUEUED”
+        # → maybe it`s just QUEUED
         mdp_file = getattr(sim, "mdp_file", None)
         if mdp_file and Path(mdp_file).exists():
             return JobStatus.QUEUED
