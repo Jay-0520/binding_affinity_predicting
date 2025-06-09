@@ -17,12 +17,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from binding_affinity_predicting.components.simulation import Simulation
 from binding_affinity_predicting.components.simulation_base import SimulationRunner
 from binding_affinity_predicting.data.enums import JobStatus, LegType, PreparationStage
-from binding_affinity_predicting.data.schemas import (
-    GromacsFepSimulationConfig,
-)
+from binding_affinity_predicting.data.schemas import GromacsFepSimulationConfig
 from binding_affinity_predicting.hpc_cluster.virtual_queue import Job, VirtualQueue
 from binding_affinity_predicting.simulation.mdp_parameters import (
     MDPGenerator,
@@ -57,6 +57,8 @@ class LambdaWindow(SimulationRunner):
         self.lam_state = lam_state
         self.virtual_queue = virtual_queue
         self.sim_params = sim_params
+        # TODO: need to define a _equil_time
+        self._equil_time = 1_000
 
         # Initialize Pydantic-based generators
         self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
@@ -565,11 +567,13 @@ class Calculation(SimulationRunner):
         self.slurm_generator = slurm_generator or self._create_default_slurm_generator()
         self._sub_sim_runners: list[Leg] = []  # type: ignore[assignment]
 
+    # TODO: we should clean up these _create_default_mdp_generator()
     def _create_default_mdp_generator(self) -> MDPGenerator:
         """Create default MDP generator from sim_config."""
         mdp_overrides = getattr(self.sim_config, "mdp_overrides", {})
         return create_custom_mdp_generator(**mdp_overrides)
 
+    # TODO: we should clean up these _create_default_slurm_generator
     def _create_default_slurm_generator(self) -> SlurmSubmitGenerator:
         """Create default SLURM generator from sim_config."""
         slurm_overrides = getattr(self.sim_config, "slurm_overrides", {})

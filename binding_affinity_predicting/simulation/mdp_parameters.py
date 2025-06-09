@@ -159,6 +159,15 @@ class MDPParameters(BaseModel):
         default=-1, description="Calculate neighbors (-1 = all)"
     )
 
+    dhdl_print_energy: str = Field(
+        default="total", description="Include the total energy in the dhdl file"
+    )
+    dhdl_derivatives: str = Field(
+        default='yes',
+        description="write out or not derivatives of the "
+        "Hamiltonian with respect to lambda at each nstdhdl step",
+    )
+
     # Lambda vectors (will be populated based on simulation config)
     bonded_lambdas: list[float] = Field(
         default_factory=list, description="Bonded lambda values"
@@ -412,6 +421,8 @@ class MDPGenerator:
             f"coul-lambdas             = {' '.join(map(str, params.coul_lambdas))}",
             f"vdw-lambdas              = {' '.join(map(str, params.vdw_lambdas))}",
             f"nstdhdl                  = {params.nstdhdl}",
+            f"dhdl-print-energy        = {params.dhdl_print_energy}",
+            f"dhdl-derivatives         = {params.dhdl_derivatives}",
             f"calc-lambda-neighbors    = {params.calc_lambda_neighbors}",
         ]
 
