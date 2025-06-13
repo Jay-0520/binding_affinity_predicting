@@ -17,8 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-
 from binding_affinity_predicting.components.simulation import Simulation
 from binding_affinity_predicting.components.simulation_base import SimulationRunner
 from binding_affinity_predicting.data.enums import JobStatus, LegType, PreparationStage
@@ -38,6 +36,12 @@ logger.setLevel(logging.INFO)
 
 
 class LambdaWindow(SimulationRunner):
+    """
+    A LambdaWindow represents a single λ-window in the ABFE calculation.
+
+    note that in sim_params, we store the full list of bonded_list, coul_list, and vdw_list
+    """
+
     runtime_attributes = {"_finished": False, "_failed": False, "_dg": None}
 
     def __init__(
@@ -328,6 +332,14 @@ class Leg(SimulationRunner):
         """Create default SLURM generator with parameters from sim_config."""
         slurm_overrides = getattr(self.sim_config, "slurm_overrides", {})
         return create_custom_slurm_generator(**slurm_overrides)
+
+    @property
+    def lambda_windows(self) -> list["LambdaWindow"]:
+        """
+        Get all lambda windows in this leg.
+
+        """
+        return self._sub_sim_runners
 
     def setup(self) -> None:
         """
@@ -687,7 +699,7 @@ class Calculation(SimulationRunner):
 
     @property
     def legs(self) -> list[Leg]:
-        """Convenience property to access legs (for backward compatibility)"""
+        """Convenience property to access legs"""
         return self._sub_sim_runners
 
     def clean_simulations(self, clean_logs: bool = False) -> None:

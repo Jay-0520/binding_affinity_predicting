@@ -13,10 +13,10 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field
 
 from binding_affinity_predicting.components.gromacs_orchestration import (
     Calculation,
@@ -32,8 +32,6 @@ logger.setLevel(logging.INFO)
 # ============================================================================
 # Enums and Configuration Classes
 # ============================================================================
-
-
 class FepStage(Enum):
     """GROMACS FEP simulation stages"""
 
@@ -57,7 +55,7 @@ class StageConfig:
     method: SpacingMethod = SpacingMethod.TARGET_ERROR
     target_error: float = 1.0
     n_windows: Optional[int] = None
-    user_lambdas: Optional[List[float]] = None
+    user_lambdas: Optional[list[float]] = None
     error_type: str = "root_var"  # "root_var" or "sem"
     sem_origin: str = "inter"  # "inter" or "intra"
     smoothen_errors: bool = True
@@ -80,8 +78,6 @@ class OptimizationConfig:
 # ============================================================================
 # Data Classes for Results
 # ============================================================================
-
-
 @dataclass
 class WindowAnalysis:
     """Analysis results for a single lambda window"""
@@ -95,7 +91,7 @@ class WindowAnalysis:
 
     # Gradient statistics
     mean_gradient: float
-    root_variance: float
+    root_variance: float  # This is related to "difficulty"
     sem_inter: float
     sem_intra: float
     n_data_points: int
@@ -107,9 +103,9 @@ class StageResult:
     """Optimization results for a single FEP stage"""
 
     stage: FepStage
-    original_lambdas: List[float]
-    optimal_lambdas: List[float]
-    window_analyses: List[WindowAnalysis]
+    original_lambdas: list[float]
+    optimal_lambdas: list[float]
+    window_analyses: list[WindowAnalysis]
     improvement_factor: float
     success: bool
     error_message: Optional[str] = None
@@ -120,16 +116,16 @@ class OptimizationResult:
     """Complete multi-stage optimization results"""
 
     leg_type: str
-    stage_results: Dict[FepStage, StageResult]
+    stage_results: dict[FepStage, StageResult]
 
     # Combined lambda vectors for GROMACS
-    original_bonded: List[float]
-    original_coul: List[float]
-    original_vdw: List[float]
+    original_bonded: list[float]
+    original_coul: list[float]
+    original_vdw: list[float]
 
-    optimal_bonded: List[float]
-    optimal_coul: List[float]
-    optimal_vdw: List[float]
+    optimal_bonded: list[float]
+    optimal_coul: list[float]
+    optimal_vdw: list[float]
 
     overall_improvement: float
     success: bool
@@ -138,8 +134,6 @@ class OptimizationResult:
 # ============================================================================
 # Core Optimizer Classes
 # ============================================================================
-
-
 class GradientAnalyzer:
     """Handles reading and analyzing gradient data from GROMACS windows"""
 
@@ -148,14 +142,21 @@ class GradientAnalyzer:
         window: LambdaWindow,
         run_nos: Optional[list[int]] = None,
         equilibrated: bool = False,
-    ) -> Optional[WindowAnalysis]:
+    ) -> WindowAnalysis:
         """Analyze gradients from a single lambda window"""
 
-        # Extract lambda values and determine stage
-        lambdas = self._extract_lambda_values(window)
-        if lambdas is None:
-            return None
+        try:
+            lambda_state = window.lam_state
+        except AttributeError:
+            logger.warning(f"Lambda state not found in window {LambdaWindow.__str__}")
+            raise ValueError(f"Lambda state not found in window {LambdaWindow.__str__}")
 
+        # Extract original lambda values for a given LambdaWindow
+        # lambdas = (bonded, coul, vdw) and cannot be None
+        lambdas = self._extract_lambda_values(window)
+
+        # Determine FEP stage based on lambda values
+        # and return the original varying lambda
         coul_lambda, vdw_lambda, bonded_lambda = lambdas
         stage, stage_lambda = self._determine_stage(
             coul_lambda, vdw_lambda, bonded_lambda
@@ -163,14 +164,12 @@ class GradientAnalyzer:
 
         # Collect gradient data from all runs
         gradient_data = self._collect_gradients(window, run_nos, equilibrated)
-        if gradient_data is None:
-            return None
 
         # Calculate statistics
         stats = self._calculate_statistics(gradient_data)
 
         return WindowAnalysis(
-            lambda_state=getattr(window, 'lam_state', 0),
+            lambda_state=lambda_state,
             coul_lambda=coul_lambda,
             vdw_lambda=vdw_lambda,
             bonded_lambda=bonded_lambda,
@@ -181,11 +180,15 @@ class GradientAnalyzer:
 
     def _extract_lambda_values(
         self, window: LambdaWindow
-    ) -> Optional[tuple[float, float, float]]:
+    ) -> tuple[float, float, float]:
         """Extract (coul, vdw, bonded) lambda values from window"""
         try:
             sim_params = window.sim_params
-            lam_state = getattr(window, 'lam_state', 0)
+            try:
+                lam_state = window.lam_state
+            except AttributeError:
+                logger.warning("Lambda state not found in window")
+                raise ValueError("Lambda state not found in window")
 
             coul = (
                 float(sim_params.get('coul_list', [0.0])[lam_state])
@@ -206,14 +209,28 @@ class GradientAnalyzer:
             return coul, vdw, bonded
         except Exception as e:
             logger.warning(f"Failed to extract lambda values: {e}")
-            return None
+            raise ValueError(
+                f"Failed to extract lambda values from window {LambdaWindow}"
+            ) from e
 
     def _determine_stage(
         self, coul: float, vdw: float, bonded: float
     ) -> tuple[FepStage, float]:
-        """Determine FEP stage and return the varying lambda"""
-        tol = 1e-6  # 0.00001
+        """
+        TODO: may need to be more robust in the future.
+        Determine FEP stage and return the varying lambda
 
+        This is due to specific mdp settings in GROMACS FEP simulations.
+        so stage is defined by the varying lambda:
+        - RESTRAINED: bonded-lambdas vary (0.0 → 1.0)
+        - DISCHARGING: coul-lambdas vary (0.0 → 1.0)
+        - VANISHING: vdw-lambdas vary (0.0 → 1.0)
+
+        Returns:
+            FepStage: The determined FEP stage
+            float: The varying lambda for this stage
+        """
+        tol = 1e-6  # 0.00001
         if abs(coul) < tol and abs(vdw) < tol:
             return FepStage.RESTRAINED, bonded
         elif abs(bonded - 1.0) < tol and abs(vdw) < tol:
@@ -231,7 +248,7 @@ class GradientAnalyzer:
 
     def _collect_gradients(
         self, window: LambdaWindow, run_nos: Optional[list[int]], equilibrated: bool
-    ) -> Optional[dict]:
+    ) -> dict:
         """Collect gradient data from all runs"""
         if run_nos is None:
             run_nos = list(range(1, window.ensemble_size + 1))
@@ -242,13 +259,17 @@ class GradientAnalyzer:
 
         for run_no in run_nos:
             gradients, sim_time = self._read_run_gradients(window, run_no, equilibrated)
-            if gradients is not None and len(gradients) > 0:
+            # gradients cannot be None
+            if len(gradients) > 0:
                 all_gradients.append(gradients)
                 run_means.append(np.mean(gradients))
                 total_time += sim_time
 
+        # In theory, all_gradients should not be empty
         if not all_gradients:
-            return None
+            raise ValueError(
+                f"No valid gradients found for window {window} with runs {run_nos}"
+            )
 
         return {
             'all_gradients': all_gradients,
@@ -258,17 +279,20 @@ class GradientAnalyzer:
 
     def _read_run_gradients(
         self, window: LambdaWindow, run_no: int, equilibrated: bool
-    ) -> Tuple[Optional[np.ndarray], float]:
+    ) -> tuple[np.ndarray, float]:
         """Read gradients from a single run"""
         try:
             run_dir = Path(window.output_dir) / f"run_{run_no}"
             xvg_file = run_dir / f"lambda_{window.lam_state}_run_{run_no}.xvg"
 
             if not xvg_file.exists():
-                return None, 0.0
+                raise FileNotFoundError(
+                    f"Gradient file not found for run {run_no}: {xvg_file}"
+                )
 
             times, gradients = self._parse_xvg_file(xvg_file)
 
+            # only consider gradients after equilibration
             if equilibrated and hasattr(window, '_equil_time'):
                 equil_idx = np.searchsorted(times, window._equil_time)
                 times = times[equil_idx:]
@@ -278,7 +302,9 @@ class GradientAnalyzer:
 
         except Exception as e:
             logger.warning(f"Failed to read run {run_no}: {e}")
-            return None, 0.0
+            raise ValueError(
+                f"Failed to read gradients for run {run_no} in window {window}"
+            ) from e
 
     def _parse_xvg_file(self, xvg_file: Path) -> tuple[np.ndarray, np.ndarray]:
         """Parse GROMACS .xvg file to extract total gradients"""
@@ -334,7 +360,7 @@ class StageOptimizer:
     """Optimizes lambda spacing for a single FEP stage"""
 
     def optimize_stage(
-        self, stage: FepStage, analyses: List[WindowAnalysis], config: StageConfig
+        self, stage: FepStage, analyses: list[WindowAnalysis], config: StageConfig
     ) -> StageResult:
         """Optimize lambda spacing for a single stage"""
 
@@ -383,8 +409,8 @@ class StageOptimizer:
             )
 
     def _calculate_optimal_lambdas(
-        self, analyses: List[WindowAnalysis], config: StageConfig
-    ) -> List[float]:
+        self, analyses: list[WindowAnalysis], config: StageConfig
+    ) -> list[float]:
         """Calculate optimal lambda spacing"""
 
         if config.method == SpacingMethod.USER_PROVIDED:
@@ -413,8 +439,8 @@ class StageOptimizer:
             raise ValueError(f"Unknown method: {config.method}")
 
     def _get_errors(
-        self, analyses: List[WindowAnalysis], config: StageConfig
-    ) -> List[float]:
+        self, analyses: list[WindowAnalysis], config: StageConfig
+    ) -> list[float]:
         """Extract error values based on configuration"""
         if config.error_type == "root_var":
             return [a.root_variance for a in analyses]
@@ -426,7 +452,7 @@ class StageOptimizer:
         else:
             raise ValueError(f"Unknown error type: {config.error_type}")
 
-    def _smooth_errors(self, errors: List[float]) -> List[float]:
+    def _smooth_errors(self, errors: list[float]) -> list[float]:
         """Simple error smoothing"""
         if len(errors) <= 2:
             return errors
@@ -444,84 +470,129 @@ class StageOptimizer:
 
     def _optimize_for_target_error(
         self,
-        lambdas: List[float],
-        errors: List[float],
+        lambdas: list[float],
+        errors: list[float],
         target_error: float,
         round_lambdas: bool,
-    ) -> List[float]:
-        """Optimize for target error per interval"""
+    ) -> list[float]:
+        """Optimize for target error per interval using trapezoidal rule
 
-        # Interpolate and integrate
-        lam_interp = np.linspace(0, 1, 1000)
-        errors_interp = np.interp(lam_interp, lambdas, errors)
-        cumulative = np.cumsum(errors_interp) * (lam_interp[1] - lam_interp[0])
+        This is exactly the same as the original implementation here:
+        "a3fe/a3fe/analyse/process_grads.py 
+        GradientData.calculate_optimal_lam_vals(delta_er=target_error)"
+        """
 
-        # Place lambdas at target intervals
-        max_error = cumulative[-1]
-        n_intervals = max(2, int(np.ceil(max_error / target_error)))
+        # Step 1: Calculate integrated errors using trapezoidal rule
+        integrated_errors = []
+        for i in range(len(lambdas)):
+            # Trapezoidal integration from start to point i
+            integrated_errors.append(np.trapz(errors[: i + 1], lambdas[: i + 1]))
 
-        optimal = [0.0]
-        for i in range(1, n_intervals):
-            target = (i / n_intervals) * max_error
-            idx = np.argmin(np.abs(cumulative - target))
-            optimal.append(lam_interp[idx])
-        optimal.append(1.0)
+        # Step 2: Calculate number of lambda values (not intervals)
+        total_error = integrated_errors[-1]
+        n_lam_vals = round(total_error / target_error) + 1
+        n_lam_vals = max(n_lam_vals, 2)  # Ensure at least 2 points
 
-        if round_lambdas:
-            optimal = [round(x, 3) for x in optimal]
+        # Step 3: Create equal error intervals
+        requested_sem_vals = np.linspace(0, total_error, n_lam_vals)
+
+        # Step 4: Map back to lambda values using interpolation
+        optimal = []
+        for requested_sem in requested_sem_vals:
+            optimal_lam_val = np.interp(requested_sem, integrated_errors, lambdas)
+            if round_lambdas:
+                optimal_lam_val = round(optimal_lam_val, 3)
+            optimal.append(optimal_lam_val)
 
         return optimal
 
+    # TODO: need to consolidate this with _optimize_for_target_error()
     def _optimize_for_fixed_windows(
         self,
-        lambdas: List[float],
-        errors: List[float],
+        lambdas: list[float],
+        errors: list[float],
         n_windows: int,
         round_lambdas: bool,
-    ) -> List[float]:
-        """Optimize for fixed number of windows"""
+    ) -> list[float]:
+        """
+        Optimize for fixed number of windows
 
-        # High-resolution interpolation
-        lam_interp = np.linspace(0, 1, 10000)
-        errors_interp = np.interp(lam_interp, lambdas, errors)
-        cumulative = np.cumsum(errors_interp)
-        total_difficulty = cumulative[-1]
+        This is exactly the same as the original implementation here:
+        "a3fe/a3fe/analyse/process_grads.py 
+        GradientData.calculate_optimal_lam_vals(n_lam_vals=n_windows)"
+        """
 
-        # Equal difficulty intervals
-        optimal = [0.0]
-        for i in range(1, n_windows - 1):
-            target = (i / (n_windows - 1)) * total_difficulty
-            idx = np.argmin(np.abs(cumulative - target))
-            optimal.append(lam_interp[idx])
-        optimal.append(1.0)
+        integrated_errors = [
+            np.trapz(errors[: i + 1], lambdas[: i + 1]) for i in range(len(lambdas))
+        ]
+        total_error = integrated_errors[-1]
+        n_lam_vals = max(2, n_windows)  # Use provided number directly
 
-        if round_lambdas:
-            optimal = [round(x, 3) for x in optimal]
-
+        requested_sem_vals = np.linspace(0, total_error, n_lam_vals)
+        optimal = []
+        for requested_sem in requested_sem_vals:
+            optimal_lam_val = np.interp(requested_sem, integrated_errors, lambdas)
+            if round_lambdas:
+                optimal_lam_val = round(optimal_lam_val, 3)
+            optimal.append(optimal_lam_val)
         return optimal
 
     def _calculate_improvement(
         self,
-        original: List[float],
-        optimal: List[float],
-        analyses: List[WindowAnalysis],
+        original: list[float],
+        optimal: list[float],
+        analyses: list[WindowAnalysis],
         config: StageConfig,
     ) -> float:
-        """Calculate improvement factor (simplified)"""
+        """Calculate improvement factor (simplified)
 
+        This is exactly the same as the original implementation here:
+        "a3fe/a3fe/analyse/process_grads.py 
+        GradientData.get_predicted_improvement_factor()"
+        """
         errors = self._get_errors(analyses, config)
         lambdas = [a.stage_lambda for a in analyses]
 
-        # Simple thermodynamic length calculation
-        total_error = np.trapz(errors, lambdas)
+        # Calculate optimal variance (thermodynamic length squared)
+        v_opt = (np.trapz(errors, lambdas) ** 2) / len(original)
 
-        # Theoretical optimal variance
-        v_opt = (total_error**2) / len(optimal)
+        # Assign boundaries for each original lambda value
+        lam_boundaries = {}
+        for i, lam_val in enumerate(original):
+            if i == 0:
+                lam_boundaries[lam_val] = [
+                    0,
+                    lam_val + 0.5 * (original[i + 1] - lam_val),
+                ]
+            elif i == len(original) - 1:
+                lam_boundaries[lam_val] = [
+                    lam_val - 0.5 * (lam_val - original[i - 1]),
+                    1,
+                ]
+            else:
+                lam_boundaries[lam_val] = [
+                    lam_val - 0.5 * (lam_val - original[i - 1]),
+                    lam_val + 0.5 * (original[i + 1] - lam_val),
+                ]
 
-        # Current variance (simplified)
-        v_current = (total_error**2) / len(original)
+        # Calculate integrated errors
+        integrated_errors = []
+        for i in range(len(analyses)):
+            integrated_errors.append(np.trapz(errors[: i + 1], lambdas[: i + 1]))
 
-        return np.sqrt(v_opt / v_current) if v_current > 0 else 1.0
+        # Calculate weighted errors for each original lambda
+        weighted_initial_errors = []
+        for lam_val in original:
+            boundaries = lam_boundaries[lam_val]
+            initial_error = np.interp(boundaries[0], lambdas, integrated_errors)
+            final_error = np.interp(boundaries[1], lambdas, integrated_errors)
+            weighted_initial_errors.append(final_error - initial_error)
+
+        weighted_initial_errors = np.array(weighted_initial_errors)
+        v_initial = np.sum(weighted_initial_errors**2)
+
+        # Return improvement factor
+        return np.sqrt(v_opt / v_initial) if v_initial > 0 else 1.0
 
 
 class MultiStageOptimizer:
@@ -531,20 +602,17 @@ class MultiStageOptimizer:
         self.config = config
         self.gradient_analyzer = GradientAnalyzer()
         self.stage_optimizer = StageOptimizer()
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def optimize(
         self,
-        lambda_windows: List[LambdaWindow],
+        lambda_windows: list[LambdaWindow],
         leg_type: LegType,
-        run_nos: Optional[List[int]] = None,
+        run_nos: Optional[list[int]] = None,
         equilibrated: bool = False,
     ) -> OptimizationResult:
         """Optimize lambda spacing for all stages"""
 
-        self.logger.info(
-            f"Starting multi-stage optimization for {leg_type.name} leg..."
-        )
+        logger.info(f"Starting multi-stage optimization for {leg_type.name} leg...")
 
         try:
             # Analyze all windows
@@ -569,15 +637,15 @@ class MultiStageOptimizer:
             return self._combine_results(stage_results, leg_type)
 
         except Exception as e:
-            self.logger.error(f"Optimization failed: {e}")
+            logger.error(f"Optimization failed: {e}")
             return self._create_failed_result(leg_type, str(e))
 
     def _analyze_windows(
         self,
-        windows: List[LambdaWindow],
-        run_nos: Optional[List[int]],
+        windows: list[LambdaWindow],
+        run_nos: Optional[list[int]],
         equilibrated: bool,
-    ) -> List[WindowAnalysis]:
+    ) -> list[WindowAnalysis]:
         """Analyze all lambda windows"""
         analyses = []
 
@@ -587,7 +655,7 @@ class MultiStageOptimizer:
             )
             if analysis:
                 analyses.append(analysis)
-                self.logger.info(
+                logger.info(
                     f"Analyzed λ{analysis.lambda_state}: {analysis.stage.value} "
                     f"stage_λ={analysis.stage_lambda:.3f} σ={analysis.root_variance:.2f}"
                 )
@@ -595,8 +663,8 @@ class MultiStageOptimizer:
         return analyses
 
     def _group_by_stage(
-        self, analyses: List[WindowAnalysis]
-    ) -> Dict[FepStage, List[WindowAnalysis]]:
+        self, analyses: list[WindowAnalysis]
+    ) -> dict[FepStage, list[WindowAnalysis]]:
         """Group analyses by FEP stage"""
         groups = {stage: [] for stage in FepStage}
 
@@ -605,12 +673,12 @@ class MultiStageOptimizer:
 
         for stage, group in groups.items():
             if group:
-                self.logger.info(f"{stage.value} stage: {len(group)} windows")
+                logger.info(f"{stage.value} stage: {len(group)} windows")
 
         return groups
 
     def _combine_results(
-        self, stage_results: Dict[FepStage, StageResult], leg_type: LegType
+        self, stage_results: dict[FepStage, StageResult], leg_type: LegType
     ) -> OptimizationResult:
         """Combine stage results into final result"""
 
@@ -679,31 +747,29 @@ class MultiStageOptimizer:
 
     def _log_results(self, result: OptimizationResult) -> None:
         """Log optimization results"""
-        self.logger.info("=" * 60)
-        self.logger.info("MULTI-STAGE OPTIMIZATION RESULTS")
-        self.logger.info("=" * 60)
-        self.logger.info(f"Leg: {result.leg_type}")
-        self.logger.info(f"Success: {result.success}")
-        self.logger.info(f"Overall improvement: {result.overall_improvement:.3f}")
+        logger.info("=" * 60)
+        logger.info("MULTI-STAGE OPTIMIZATION RESULTS")
+        logger.info("=" * 60)
+        logger.info(f"Leg: {result.leg_type}")
+        logger.info(f"Success: {result.success}")
+        logger.info(f"Overall improvement: {result.overall_improvement:.3f}")
 
         for stage, stage_result in result.stage_results.items():
-            self.logger.info(f"\n{stage.value.upper()}:")
+            logger.info(f"\n{stage.value.upper()}:")
             if stage_result.success:
-                self.logger.info(
+                logger.info(
                     f"  {len(stage_result.original_lambdas)} → {len(stage_result.optimal_lambdas)} windows"
                 )
-                self.logger.info(
-                    f"  Improvement: {stage_result.improvement_factor:.3f}"
-                )
-                self.logger.info(f"  Lambdas: {stage_result.optimal_lambdas}")
+                logger.info(f"  Improvement: {stage_result.improvement_factor:.3f}")
+                logger.info(f"  Lambdas: {stage_result.optimal_lambdas}")
             else:
-                self.logger.info(f"  ❌ FAILED: {stage_result.error_message}")
+                logger.info(f"  ❌ FAILED: {stage_result.error_message}")
 
-        self.logger.info(f"\nCOMBINED VECTORS:")
-        self.logger.info(f"bonded-lambdas: {result.optimal_bonded}")
-        self.logger.info(f"coul-lambdas:   {result.optimal_coul}")
-        self.logger.info(f"vdw-lambdas:    {result.optimal_vdw}")
-        self.logger.info("=" * 60)
+        logger.info(f"\nCOMBINED VECTORS:")
+        logger.info(f"bonded-lambdas: {result.optimal_bonded}")
+        logger.info(f"coul-lambdas:   {result.optimal_coul}")
+        logger.info(f"vdw-lambdas:    {result.optimal_vdw}")
+        logger.info("=" * 60)
 
     def _create_failed_result(
         self, leg_type: LegType, error_msg: str
@@ -726,28 +792,25 @@ class MultiStageOptimizer:
 # ============================================================================
 # Manager Class for Integration
 # ============================================================================
-
-
 class LambdaOptimizationManager:
     """High-level manager for lambda optimization"""
 
     def __init__(self, config: OptimizationConfig):
         self.optimizer = MultiStageOptimizer(config)
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def optimize_calculation(
         self,
         calculation: Calculation,
-        run_nos: Optional[List[int]] = None,
+        run_nos: Optional[list[int]] = None,
         equilibrated: bool = False,
         apply_results: bool = False,
-    ) -> Dict[str, OptimizationResult]:
+    ) -> dict[str, OptimizationResult]:
         """Optimize entire calculation"""
 
         results = {}
 
         for leg in calculation.legs:
-            self.logger.info(f"Optimizing {leg.leg_type.name} leg...")
+            logger.info(f"Optimizing {leg.leg_type.name} leg...")
 
             result = self.optimizer.optimize(
                 lambda_windows=leg._sub_sim_runners,
@@ -776,18 +839,16 @@ class LambdaOptimizationManager:
             leg._sub_sim_runners.clear()
             leg._instantiate_lambda_windows()
 
-            self.logger.info(f"✅ Applied optimization to {leg.leg_type.name} leg")
+            logger.info(f"✅ Applied optimization to {leg.leg_type.name} leg")
 
         except Exception as e:
-            self.logger.error(f"❌ Failed to apply optimization: {e}")
+            logger.error(f"❌ Failed to apply optimization: {e}")
             raise
 
 
 # ============================================================================
 # Simple Usage Examples
 # ============================================================================
-
-
 def create_simple_config(target_error: float = 1.0) -> OptimizationConfig:
     """Create simple uniform configuration"""
     return OptimizationConfig(
