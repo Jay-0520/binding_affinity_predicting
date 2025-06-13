@@ -47,7 +47,7 @@ def get_statistical_inefficiency(
         If supplied, the cross-correlation of timeseries A and B will be estimated instead of the
         autocorrelation of timeseries A.
     fast : bool, optional, default=False
-        f True, will use faster (but less accurate) method to estimate correlation
+        if True, will use faster (but less accurate) method to estimate correlation
         time, described in Ref. [1] (default: False).
     mintime : int, optional, default=3
         minimum amount of correlation function to compute (default: 3)
