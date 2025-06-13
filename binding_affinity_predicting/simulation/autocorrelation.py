@@ -36,7 +36,8 @@ def get_statistical_inefficiency(
     mintime: int = 3,
 ) -> float:
     """
-    Compute the (cross) statistical inefficiency of (two) timeseries using multiscale method from Chodera.
+    Compute the (cross) statistical inefficiency of (two) timeseries using
+      multiscale method from Chodera.
     Parameters
     ----------
     A_n : _np.ndarray, float
@@ -56,11 +57,13 @@ def get_statistical_inefficiency(
     Returns
     -------
     g : float,
-        g is the estimated statistical inefficiency (equal to 1 + 2 tau, where tau is the correlation time).
+        g is the estimated statistical inefficiency (equal to 1 + 2 tau,
+        where tau is the correlation time).
         We enforce g >= 1.0.
     Notes
     -----
-    The same timeseries can be used for both A_n and B_n to get the autocorrelation statistical inefficiency.
+    The same timeseries can be used for both A_n and B_n to get the
+    autocorrelation statistical inefficiency.
     The fast method described in Ref [1] is used to compute g.
     References
     ----------
