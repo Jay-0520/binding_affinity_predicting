@@ -93,7 +93,6 @@ from binding_affinity_predicting.components.lambda_optimizer import (
 )
 from binding_affinity_predicting.components.gromacs_orchestration import Calculation
 
-
 # Initiate the calculation
 calc = Calculation(input_dir="~/input",
                     output_dir="~/output",
@@ -121,26 +120,6 @@ calc.run(runtime=long_runtime, use_hpc=False, run_sync=True)
 ### Results Analysis
 
 TBD
-
----
-
-## 📁 Project Structure
-
-```
-binding_affinity_predicting/
-├── components/           # Core calculation components
-│   ├── gromacs_orchestration.py  # GROMACS workflow orchestration
-│   └── lambda_optimizer.py       # Multi-stage lambda optimization
-├── data/                # Data models and schemas
-│   ├── schemas.py       # Pydantic configuration models
-│   └── enums.py         # Status and type enumerations
-├── hpc_cluster/         # HPC integration utilities
-│   └── virtual_queue.py # SLURM virtual queue management
-├── simulation/          # Simulation analysis tools
-│   └── autocorrelation.py  # Statistical inefficiency analysis
-└── workflows/           # High-level workflow orchestration
-    └── free_energy_calc/   # FEP-specific workflows
-```
 
 ---
 
