@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+# TODO need to consolidate these Enum and configs
 # ============================================================================
-# Enums and Configuration Classes
+# Enums and Configuration Classes for Lambda Optimization
 # ============================================================================
 class FepStage(Enum):
     """GROMACS FEP simulation stages"""
@@ -760,7 +761,7 @@ class MultiStageOptimizer:
         overall_improvement = np.mean(improvements) if improvements else 1.0
         success = all(r.success for r in stage_results.values())
 
-        result = OptimizationResult(
+        optimization_result = OptimizationResult(
             leg_type=leg_type.name,
             stage_results=stage_results,
             original_bonded=orig_bonded,
@@ -773,8 +774,8 @@ class MultiStageOptimizer:
             success=success,
         )
 
-        self._log_results(result)
-        return result
+        self._log_results(optimization_result)
+        return optimization_result
 
     def _log_results(self, result: OptimizationResult) -> None:
         """Log optimization results"""
@@ -854,21 +855,68 @@ class LambdaOptimizationManager:
 
         return results
 
-    def _apply_to_leg(self, leg: Leg, result: OptimizationResult) -> None:
-        """Apply optimization results to a leg"""
+    def _apply_to_leg(
+        self, leg: Leg, result: OptimizationResult, backup_original: bool = True
+    ) -> None:
+        """Apply optimization results to a leg with proper directory setup"""
+
+        logger.info(f"Applying optimization results to {leg.leg_type.name} leg...")
+        logger.info(f"Original windows: {len(leg.lambda_windows)}")
+        logger.info(f"Optimized windows: {len(result.optimal_bonded)}")
+
         try:
-            # Update lambda vectors
+            # Step 1: Backup original directories if requested
+            if backup_original:
+                leg.create_backup()
+
+            # Step 2: Update lambda vectors in sim_config
             leg.sim_config.bonded_lambdas[leg.leg_type] = result.optimal_bonded
             leg.sim_config.coul_lambdas[leg.leg_type] = result.optimal_coul
             leg.sim_config.vdw_lambdas[leg.leg_type] = result.optimal_vdw
 
-            # Recreate windows
+            # Step 3: Update lambda indices to match new window count
             leg.lam_indices = list(range(len(result.optimal_bonded)))
+
+            # Step 4: Clear existing lambda windows
             leg._sub_sim_runners.clear()
+
+            # Step 5: Remove old lambda directories and recreate using existing Leg methods
+            self._clean_and_recreate_directories(leg)
+
+            # Step 6: Instantiate new lambda windows (reusing existing method)
             leg._instantiate_lambda_windows()
 
-            logger.info(f"✅ Applied optimization to {leg.leg_type.name} leg")
+            logger.info(
+                f"✅ Successfully applied optimization to {leg.leg_type.name} leg"
+            )
+            logger.info(f"Created {len(leg.lambda_windows)} new lambda windows")
 
         except Exception as e:
             logger.error(f"❌ Failed to apply optimization: {e}")
+            # Try to restore from backup if it exists
+            if backup_original and leg.has_backup:
+                leg.restore_from_backup()
             raise
+
+    def _clean_and_recreate_directories(self, leg: Leg) -> None:
+        """Clean old lambda directories and recreate using existing Leg methods"""
+        import shutil
+
+        leg_base = Path(leg.output_dir)
+        leg_input = leg_base / "input"
+
+        # Step 1: Remove existing lambda_* directories (but keep input/ and other files)
+        logger.info("Removing old lambda directories...")
+        for item in leg_base.iterdir():
+            if item.is_dir() and item.name.startswith("lambda_"):
+                shutil.rmtree(item)
+
+        # Step 2: Verify leg_input exists (should already exist from original setup)
+        if not leg_input.exists():
+            raise RuntimeError(f"Input directory not found: {leg_input}")
+
+        # Step 3: Reuse existing Leg method to create new directory structure
+        logger.info(f"Creating {len(leg.lam_indices)} new lambda directories...")
+        leg._make_lambda_run_dirs_and_link(leg_input)
+
+        logger.info("✅ Directory structure recreated successfully")

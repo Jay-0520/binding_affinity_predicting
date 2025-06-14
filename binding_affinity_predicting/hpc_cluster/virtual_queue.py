@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+# TODO: need to remove and consolidate logging stuffs
 @dataclass
 class Job:
     """Class to hold information about a job"""
@@ -90,6 +91,8 @@ class VirtualQueue:
         self.queue_len_lim = queue_len_lim
         self.log_dir = log_dir
         self._stream_log_level = stream_log_level
+
+        self._logger: logging.Logger
 
         # Set up logging
         self._set_up_logging()
@@ -186,7 +189,9 @@ class VirtualQueue:
         # Get job ids of currently running jobs. This occasionally fails when SLURM is
         # busy (e.g. 'slurm_load_jobs error: Socket timed out on send/recv operation'),
         # so retry a few times, waiting a while in between
-        @retry(times=5, exceptions=(ValueError), wait_time=120, logger=self._logger)
+        @retry(
+            times=5, exceptions=(ValueError,), wait_time=120, logger=self._logger  # type: ignore
+        )  # type: ignore
         def _read_slurm_queue_inner() -> list[int]:
             """This inner function is defined so that we can pass self._logger
             to the decorator"""
@@ -238,7 +243,7 @@ class VirtualQueue:
         # Define inner loop to allow use of retry decorator with self.logger
         @retry(
             times=15,
-            exceptions=(ValueError, RuntimeError),
+            exceptions=(ValueError, RuntimeError),  # type: ignore
             wait_time=5,
             logger=self._logger,
         )
@@ -253,8 +258,8 @@ class VirtualQueue:
             )
             if process.stdout is None:
                 raise ValueError("Could not get stdout from process.")
-            process_output = process.stdout.read()
-            process_output = process_output.decode("utf-8").strip()
+            process_output_bytes = process.stdout.read()
+            process_output = process_output_bytes.decode("utf-8").strip()
             try:
                 slurm_job_id = int((process_output.split()[-1]))
                 return slurm_job_id

@@ -173,10 +173,10 @@ class SimulationRunner(ABC):
                 else:
                     self._running = any(sub.running for sub in self._sub_sim_runners)
 
-    def _run_local(self, run_nos: list[int]) -> None:
+    def _run_local(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
         """Run simulations locally (blocking). Override in subclasses."""
         for sub_runner in self._sub_sim_runners:
-            sub_runner.run(run_nos=run_nos, use_hpc=False)
+            sub_runner.run(run_nos=run_nos, runtime=runtime, use_hpc=False)
         self._update_status()
 
     def _run_hpc(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
