@@ -181,15 +181,24 @@ class LambdaWindow(SimulationRunner):
         runtime: Optional[float] = None,
         use_hpc: bool = True,
     ) -> None:
-        """Run simulations for specified run numbers"""
+        """
+        Run simulations for specified run numbers
+
+        Parameters
+        ----------
+        run_nos : List[int] or None
+            If provided, only run those replicate indices.
+            If None, run all replicates [1..ensemble_size].
+        runtime : float or None (ns)
+        """
         run_nos = self._get_valid_run_nos(run_nos)
 
         if use_hpc and self.virtual_queue is not None:
             self._run_hpc(run_nos, runtime)
         else:
-            self._run_local(run_nos)  # we don't need runtime here
+            self._run_local(run_nos, runtime)
 
-    def _run_local(self, run_nos: list[int]) -> None:
+    def _run_local(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
         """Run simulations locally (blocking)"""
         # Run only the specified simulations
         for run_no in run_nos:
@@ -198,6 +207,10 @@ class LambdaWindow(SimulationRunner):
                     f"Invalid run number {run_no}. Must be in [1..{self.ensemble_size}]."
                 )
             sim_index = run_no - 1
+            # Pass runtime to individual simulation
+            if runtime is not None:
+                self._sub_sim_runners[sim_index].runtime_ns = runtime
+
             self._sub_sim_runners[sim_index].run()
 
         # Update status based on simulation results
@@ -322,6 +335,9 @@ class Leg(SimulationRunner):
         self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
         self.slurm_generator = slurm_generator or self._create_default_slurm_generator()
         self._sub_sim_runners: list["LambdaWindow"] = []  # type: ignore[assignment]
+
+        # ADD THIS: Backup path for optimization safety
+        self._backup_path: Optional[Path] = None
 
     def _create_default_mdp_generator(self) -> MDPGenerator:
         """Create default MDP generator with parameters from sim_config."""
@@ -484,7 +500,6 @@ class Leg(SimulationRunner):
     def run(
         self,
         run_nos: Optional[list[int]] = None,
-        adaptive: bool = False,
         runtime: Optional[float] = None,
         use_hpc: bool = True,
     ) -> None:
@@ -495,10 +510,7 @@ class Leg(SimulationRunner):
         ----------
         run_nos : List[int] or None
             If provided, only run those replicate indices per λ.
-        adaptive : bool
-            Ignored here (passed down to LambdaWindow if needed).
-        runtime : float or None
-            If adaptive=False, must provide `runtime` (ns).
+        runtime : float or None (ns)
         hpc : bool
             If True, submit to SLURM via VirtualQueue (non-blocking).
             If False, run locally (blocking).
@@ -515,7 +527,7 @@ class Leg(SimulationRunner):
         logger.info(
             f"Running leg {self.leg_type.name} locally with {len(self._sub_sim_runners)} windows"
         )
-        super()._run_local(run_nos)
+        super()._run_local(run_nos, runtime)
 
     def _run_hpc(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
         """Submit all lambda windows to SLURM (non-blocking)"""
@@ -524,6 +536,82 @@ class Leg(SimulationRunner):
             f"with {len(self._sub_sim_runners)} windows"
         )
         super()._run_hpc(run_nos, runtime)
+
+    def create_backup(self, backup_suffix: Optional[str] = None) -> Path:
+        """
+        Create a backup of this leg's directory structure.
+
+        Parameters
+        ----------
+        backup_suffix : str, optional
+            Custom suffix for backup directory. If None, uses timestamp.
+
+        Returns
+        -------
+        Path
+            Path to the created backup directory
+        """
+        if backup_suffix is None:
+            backup_suffix = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        leg_base = Path(self.output_dir)
+        backup_base = leg_base.parent / f"{leg_base.name}_backup_{backup_suffix}"
+
+        logger.info(f"Creating backup of {self.leg_type.name} leg at {backup_base}")
+
+        if leg_base.exists():
+            shutil.copytree(leg_base, backup_base)
+            self._backup_path = backup_base
+            logger.info("✅ Backup created successfully")
+        else:
+            raise RuntimeError(f"Cannot backup non-existent directory: {leg_base}")
+
+        return backup_base
+
+    def restore_from_backup(self) -> None:
+        """
+        Restore this leg's directory structure from backup.
+
+        Raises
+        ------
+        RuntimeError
+            If no backup exists or backup path is invalid
+        """
+        if self._backup_path is None:
+            raise RuntimeError("No backup path set. Create a backup first.")
+
+        if not self._backup_path.exists():
+            raise RuntimeError(f"Backup directory not found: {self._backup_path}")
+
+        leg_base = Path(self.output_dir)
+
+        logger.info(
+            f"Restoring {self.leg_type.name} leg from backup: {self._backup_path}"
+        )
+
+        # Remove current structure
+        if leg_base.exists():
+            shutil.rmtree(leg_base)
+
+        # Restore from backup
+        shutil.copytree(self._backup_path, leg_base)
+
+        logger.info("✅ Restored from backup successfully")
+
+    def cleanup_backup(self) -> None:
+        """
+        Remove the backup directory to save disk space.
+        """
+        if self._backup_path is not None and self._backup_path.exists():
+            logger.info(f"Cleaning up backup: {self._backup_path}")
+            shutil.rmtree(self._backup_path)
+            self._backup_path = None
+            logger.info("✅ Backup cleaned up")
+
+    @property
+    def has_backup(self) -> bool:
+        """Check if this leg has a valid backup available."""
+        return self._backup_path is not None and self._backup_path.exists()
 
     def __str__(self) -> str:
         """
@@ -628,7 +716,6 @@ class Calculation(SimulationRunner):
     def run(
         self,
         run_nos: Optional[list[int]] = None,
-        adaptive: bool = False,
         runtime: Optional[float] = None,
         use_hpc: bool = True,
         run_sync: bool = True,
@@ -642,14 +729,11 @@ class Calculation(SimulationRunner):
         ----------
         run_nos : List[int] or None
             If provided, only run those replica indices (1-based) for each lambda.
-        runtime : float, Optional, default: None
-            If adaptive is False, runtime must be supplied and stage will run for this
-            number of nanoseconds.
+        runtime : float, Optional, default: None (ns)
         use_hpc : bool
             If True, submit all windows` `submit_gmx.sh` to SLURM (nonblocking).
             If False, run everything locally (blocking).
         run_sync :
-        adaptive :
         """
         if not getattr(self, "setup_complete", False):
             raise ValueError("Calculation has not been set up yet. Call setup() first.")
@@ -667,7 +751,7 @@ class Calculation(SimulationRunner):
         else:
             # run locally (blocking)
             if run_sync:
-                self._run_local(run_nos=run_nos)
+                self._run_local(run_nos=run_nos, runtime=runtime)
                 return None
             # now run locally AND asynchronously (non-blocking)
             else:
@@ -675,7 +759,6 @@ class Calculation(SimulationRunner):
                 def run_in_thread():
                     self.run(
                         run_nos=run_nos,
-                        adaptive=adaptive,
                         runtime=runtime,
                         use_hpc=False,
                     )
@@ -687,10 +770,11 @@ class Calculation(SimulationRunner):
     def _run_local(
         self,
         run_nos: list[int],
+        runtime: Optional[float] = None,
     ) -> None:
         """Run the calculation locally (blocking)"""
         logger.info("Running ABFE calculation locally")
-        super()._run_local(run_nos=run_nos)
+        super()._run_local(run_nos=run_nos, runtime=runtime)
 
     def _run_hpc(self, run_nos: list[int], runtime: Optional[float] = None) -> None:
         """Submit the calculation to SLURM (non-blocking)"""
