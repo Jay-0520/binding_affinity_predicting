@@ -168,4 +168,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 ## 📞 Support
-- **Email**: jjhuang0520@outlook.com
+- **Email**: jjhuang0520@outlook.com (Jay Huang)
