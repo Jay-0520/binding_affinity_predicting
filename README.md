@@ -168,7 +168,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 ## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/YourUsername/binding_affinity_predicting/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/YourUsername/binding_affinity_predicting/discussions)
 - **Email**: jjhuang0520@outlook.com
