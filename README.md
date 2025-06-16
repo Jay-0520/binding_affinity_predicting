@@ -36,7 +36,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/YourUsername/binding_affinity_predicting.git
+git clone https://github.com/Jay-0520/binding_affinity_predicting.git
 cd binding_affinity_predicting
 
 # Create conda environment and install dependencies
