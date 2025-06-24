@@ -5,22 +5,23 @@ This module contains implementations of various free energy estimation methods
 adapted from alchemical_analysis.py, including thermodynamic integration,
 Bennett Acceptance Ratio (BAR), MBAR, and exponential averaging methods.
 
+methods are adopted from this script:
 https://github.com/MobleyLab/alchemical-analysis/blob/master/alchemical_analysis/alchemical_analysis.py
 """
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 
 import numpy as np
 import pymbar
-import scipy.interpolate as scipy_interpolate
 
 from binding_affinity_predicting.components.analysis.utils import (
     get_lambda_components_changing,
 )
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class NaturalCubicSpline:
@@ -341,14 +342,139 @@ class ThermodynamicIntegration:
 class MultistateBAR:
     """
     Multistate Bennett Acceptance Ratio implementation.
-    Adapted from alchemical_analysis.py MBAR functionality.
+    Faithfully adapted from alchemical_analysis.py MBAR functionality.
+    Uses modern parameter naming conventions.
     """
+
+    @staticmethod
+    def _calculate_beta_parameters(
+        temperature: float = 298.15, units: str = 'kJ', software: str = 'Gromacs'
+    ) -> tuple[float, float]:
+        """
+        Calculate beta and beta_report parameters exactly as in alchemical_analysis.py.
+
+        This replicates the checkUnitsAndMore() function logic.
+
+        Parameters:
+        -----------
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kJ'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name (affects kcal handling)
+
+        Returns:
+        --------
+        tuple[float, float] : (beta, beta_report)
+            beta: 1/(kB*T) in simulation units
+            beta_report: conversion factor for output units
+        """
+        # Boltzmann constant from original (kJ/mol/K)
+        kB = 1.3806488 * 6.02214129 / 1000.0  # Exact value from alchemical_analysis.py
+        beta = 1.0 / (kB * temperature)
+
+        # Check if software uses kcal (Sire, Amber vs Gromacs)
+        b_kcal = software.upper() in ['SIRE', 'AMBER']
+
+        if units.lower() == 'kj':
+            beta_report = beta / (4.184**b_kcal)
+        elif units.lower() == 'kcal':
+            beta_report = (4.184 ** (not b_kcal)) * beta
+        elif units.lower() == 'kbt':
+            beta_report = 1.0
+        else:
+            raise ValueError(
+                f"Unknown units '{units}': only 'kJ', 'kcal', and 'kBT' supported"
+            )
+
+        return beta, beta_report
+
+    @staticmethod
+    def _estimatewithMBAR_core(
+        uncorr_potential_energies: np.ndarray,
+        num_uncorr_samples_per_state: np.ndarray,
+        beta_report: float,
+        relative_tolerance: float = 1e-10,
+        regular_estimate: bool = False,
+        verbose: bool = False,
+        initialize: str = 'BAR',
+    ) -> tuple:
+        """
+        Core MBAR estimation function - direct adaptation from alchemical_analysis.py.
+
+        This implements the exact `estimatewithMBAR` logic from the original code
+        but uses modern parameter naming.
+
+        Parameters:
+        -----------
+        uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
+            Reduced potential energy matrix where [k,l,n] is the reduced potential
+            of snapshot n from state k evaluated at state l
+        num_uncorr_samples_per_state : np.ndarray, shape (K,)
+            Number of samples from each state k
+        relative_tolerance : float, default 1e-10
+            Relative tolerance for MBAR convergence
+        regular_estimate : bool, default False
+            If True, return full matrices; if False, return only endpoint difference
+        verbose : bool, default False
+            Enable verbose pymbar output
+        initialize : str, default 'BAR'
+            MBAR initialization method ('BAR' or 'zeros')
+        beta_report : float, optional
+            Unit conversion factor from original alchemical_analysis.py
+
+        Returns:
+        --------
+        If regular_estimate=True: (Deltaf_ij, dDeltaf_ij, mbar_object)
+            Full free energy difference matrices and MBAR object
+        If regular_estimate=False: (total_dg, total_error)
+            Single endpoint free energy difference and error
+        """
+        try:
+            # Initialize MBAR exactly as in original (using original parameter names internally)
+            MBAR = pymbar.mbar.MBAR(
+                uncorr_potential_energies,
+                num_uncorr_samples_per_state,
+                verbose=verbose,
+                relative_tolerance=relative_tolerance,
+                initialize=initialize,
+            )
+
+            # Get free energy differences exactly as in original
+            # note that theta_ij (marked as "_") is never used in the original code - by JJH-2025-06-24
+            (Deltaf_ij, dDeltaf_ij, _) = MBAR.getFreeEnergyDifferences(
+                uncertainty_method='svd-ew', return_theta=True
+            )
+
+            if verbose:
+                logger.info(
+                    f"Matrix of free energy differences\nDeltaf_ij:\n{Deltaf_ij}\ndDeltaf_ij:\n{dDeltaf_ij}"
+                )
+
+            # Return format matches original exactly
+            if regular_estimate:
+                return (Deltaf_ij, dDeltaf_ij, MBAR)
+            else:
+                K = len(num_uncorr_samples_per_state)
+                return (
+                    Deltaf_ij[0, K - 1] / beta_report,
+                    dDeltaf_ij[0, K - 1] / beta_report,
+                    MBAR,
+                )
+
+        except Exception as e:
+            logger.error(f"MBAR calculation failed: {e}")
+            raise
 
     @staticmethod
     def compute_mbar(
         uncorr_potential_energies: np.ndarray,
         num_uncorr_samples_per_state: np.ndarray,
         temperature: float = 298.15,
+        units: str = 'kJ',
+        software: str = 'Gromacs',
+        regular_estimate: bool = True,
         **kwargs,
     ) -> dict:
         """
@@ -363,76 +489,119 @@ class MultistateBAR:
             - Second index (l): lambda state where energy is evaluated
             - Third index (n): snapshot/time index
             Example: uncorr_potential_energies[1, 3, :] = energies of λ₁ snapshots evaluated at λ₃
-            Variable name matches your convention (was u_kln in original)
         num_uncorr_samples_per_state : np.ndarray, shape (num_lambda_states,)
             Number of samples from each lambda state
-            Variable name matches your convention (was N_k in original)
         temperature : float, default 298.15
             Temperature in Kelvin
+        units : str, default 'kJ'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name (affects unit handling)
         **kwargs : dict
             Additional MBAR parameters (relative_tolerance, verbose, initialize)
 
         Returns:
         --------
         Dict : MBAR results including free energies and errors
+            All energies converted according to specified units
             - 'total_dg': Total free energy change (kJ/mol)
             - 'total_error': Total error estimate (kJ/mol)
             - 'free_energies': Free energies relative to first state (kJ/mol)
             - 'free_energy_errors': Error estimates for each state (kJ/mol)
             - 'Deltaf_ij': Pairwise free energy differences matrix (kJ/mol)
             - 'dDeltaf_ij': Error matrix for pairwise differences (kJ/mol)
+            - 'theta_ij': Theta matrix from MBAR
             - 'mbar_object': The pymbar MBAR object
             - 'n_states': Number of lambda states
         """
+        # Extract parameters with original defaults
+        relative_tolerance = kwargs.get('relative_tolerance', 1e-10)
+        verbose = kwargs.get('verbose', False)
+        initialize = kwargs.get('initialize', 'BAR')
+        compute_overlap = kwargs.get('compute_overlap', False)
+
+        # Calculate beta parameters exactly as in original
+        beta, beta_report = MultistateBAR._calculate_beta_parameters(
+            temperature=temperature, units=units, software=software
+        )
+
         try:
-            # MBAR parameters
-            relative_tolerance = kwargs.get('relative_tolerance', 1e-10)
-            verbose = kwargs.get('verbose', False)
-            initialize = kwargs.get('initialize', 'BAR')
+            if regular_estimate:
+                Deltaf_ij, dDeltaf_ij, mbar_object = (
+                    MultistateBAR._estimatewithMBAR_core(
+                        uncorr_potential_energies=uncorr_potential_energies,
+                        num_uncorr_samples_per_state=num_uncorr_samples_per_state,
+                        relative_tolerance=relative_tolerance,
+                        regular_estimate=regular_estimate,
+                        verbose=verbose,
+                        initialize=initialize,
+                        beta_report=beta_report,
+                    )
+                )
 
-            # Initialize MBAR
-            mbar = pymbar.mbar.MBAR(
-                uncorr_potential_energies,
-                num_uncorr_samples_per_state,
-                verbose=verbose,
-                relative_tolerance=relative_tolerance,
-                initialize=initialize,
-            )
+                # Convert to physical units using proper beta_report
+                free_energies = Deltaf_ij[0, :] / beta_report
+                free_energy_errors = dDeltaf_ij[0, :] / beta_report
 
-            # Get free energy differences
-            Deltaf_ij, dDeltaf_ij, theta_ij = mbar.getFreeEnergyDifferences(
-                uncertainty_method='svd-ew', return_theta=True
-            )
+                # Total free energy change (first to last state)
+                total_dg = free_energies[-1] - free_energies[0]
+                total_error = np.sqrt(
+                    free_energy_errors[0] ** 2 + free_energy_errors[-1] ** 2
+                )
 
-            # Convert to physical units
-            kB = 8.314462618e-3  # kJ/(mol·K)
-            beta = 1.0 / (kB * temperature)
+                # Determine unit string for output
+                unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
+                    units.lower()
+                ]
 
-            # Free energies relative to first state
-            f_k = Deltaf_ij[0, :] / beta
-            df_k = dDeltaf_ij[0, :] / beta
+                result = {
+                    'total_dg': total_dg,
+                    'total_error': total_error,
+                    'free_energies': free_energies,
+                    'free_energy_errors': free_energy_errors,
+                    'Deltaf_ij': Deltaf_ij / beta_report,
+                    'dDeltaf_ij': dDeltaf_ij / beta_report,
+                    'mbar_object': mbar_object,
+                    'n_states': len(num_uncorr_samples_per_state),
+                    'units': unit_string,
+                    'beta_report': beta_report,
+                    'temperature': temperature,
+                }
 
-            # Total free energy change
-            total_dg = f_k[-1] - f_k[0]
-            total_error = np.sqrt(df_k[0] ** 2 + df_k[-1] ** 2)
+                # Compute overlap matrix if requested (matches original)
+                if compute_overlap:
+                    overlap_matrix = mbar_object.computeOverlap()[
+                        2
+                    ]  # Exact original syntax
+                    result['overlap_matrix'] = overlap_matrix
 
-            result = {
-                'total_dg': total_dg,
-                'total_error': total_error,
-                'free_energies': f_k,
-                'free_energy_errors': df_k,
-                'Deltaf_ij': Deltaf_ij / beta,
-                'dDeltaf_ij': dDeltaf_ij / beta,
-                'mbar_object': mbar,
-                'n_states': len(num_uncorr_samples_per_state),
-            }
+                return result
 
-            # Compute overlap matrix if requested
-            if kwargs.get('compute_overlap', False):
-                overlap_matrix = mbar.computeOverlap()[2]
-                result['overlap_matrix'] = overlap_matrix
+            else:
+                # Simple case - returns already converted values
+                total_dg, total_error = MultistateBAR._estimatewithMBAR_core(
+                    uncorr_potential_energies=uncorr_potential_energies,
+                    num_uncorr_samples_per_state=num_uncorr_samples_per_state,
+                    relative_tolerance=relative_tolerance,
+                    regular_estimate=regular_estimate,
+                    verbose=verbose,
+                    initialize=initialize,
+                    beta_report=beta_report,
+                )
 
-            return result
+                # Determine unit string for output
+                unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
+                    units.lower()
+                ]
+
+                return {
+                    'total_dg': total_dg,
+                    'total_error': total_error,
+                    'units': unit_string,
+                    'beta_report': beta_report,
+                    'temperature': temperature,
+                    'n_states': len(num_uncorr_samples_per_state),
+                }
 
         except Exception as e:
             logger.error(f"MBAR calculation failed: {e}")
@@ -460,10 +629,8 @@ class MultistateBAR:
                 figsize=(num_lambda_states / 2.0, num_lambda_states / 2.0)
             )
 
-            # Create heatmap
             im = ax.imshow(overlap_matrix, cmap='Blues', vmin=0, vmax=max_prob)
 
-            # Add text annotations
             for i in range(num_lambda_states):
                 for j in range(num_lambda_states):
                     prob = overlap_matrix[i, j]
@@ -472,19 +639,17 @@ class MultistateBAR:
                     elif prob > 0.995:
                         text = '1.00'
                     else:
-                        text = f"{prob:.2f}"[1:]  # Remove leading 0
+                        text = f"{prob:.2f}"[1:]  # Remove leading 0 (original behavior)
 
                     color = 'white' if prob > max_prob / 2 else 'black'
                     ax.text(
                         j, i, text, ha='center', va='center', color=color, fontsize=8
                     )
 
-            # Set labels
             ax.set_xlabel('Lambda State')
             ax.set_ylabel('Lambda State')
             ax.set_title('MBAR Overlap Matrix')
 
-            # Add colorbar
             plt.colorbar(im, ax=ax, label='Overlap Probability')
 
             plt.tight_layout()
@@ -497,6 +662,24 @@ class MultistateBAR:
             logger.warning("matplotlib not available for overlap matrix plotting")
         except Exception as e:
             logger.error(f"Failed to plot overlap matrix: {e}")
+
+    @staticmethod
+    def print_overlap_summary(overlap_matrix: np.ndarray):
+        """
+        Print overlap matrix summary as in original alchemical_analysis.py.
+
+        Parameters:
+        -----------
+        overlap_matrix : np.ndarray, shape (num_lambda_states, num_lambda_states)
+            MBAR overlap matrix
+        """
+        num_lambda_states = overlap_matrix.shape[0]
+        logger.info("The overlap matrix is...")
+        for k in range(num_lambda_states):
+            line = ''
+            for l in range(num_lambda_states):
+                line += ' %5.2f ' % overlap_matrix[k, l]
+            logger.info(line)
 
 
 class ExponentialAveraging:
