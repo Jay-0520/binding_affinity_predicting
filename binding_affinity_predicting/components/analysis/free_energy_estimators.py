@@ -53,7 +53,7 @@ class NaturalCubicSpline:
         M = np.zeros([L, L], float)
 
         h = (
-            lambdas_per_component[1:L] - lambdas_per_component[0: L - 1]
+            lambdas_per_component[1:L] - lambdas_per_component[0 : L - 1]
         )  # differences between consecutive lambda values
         ih = 1.0 / h  # inverse differences
 
@@ -639,6 +639,7 @@ class MultistateBAR:
             logger.info(line)
 
 
+# TODO: need to double check this implementation
 class ExponentialAveraging:
     """
     Exponential averaging methods adapted from alchemical_analysis.py.
@@ -928,6 +929,7 @@ class ExponentialAveraging:
         return w_F, w_R
 
 
+# TODO: need to double check this implementation
 class BennettAcceptanceRatio:
     """
     Bennett Acceptance Ratio methods adapted from alchemical_analysis.py.
@@ -1528,141 +1530,3 @@ class FreeEnergyEstimator:
         except Exception as e:
             logger.error(f"MBAR estimation failed: {e}")
             return {'method': 'MBAR', 'success': False, 'error_message': str(e)}
-
-    def estimate_all_methods(
-        self,
-        lambda_vectors: np.ndarray,
-        ave_dhdl: np.ndarray,
-        std_dhdl: np.ndarray,
-        uncorr_potential_energies: np.ndarray,
-        num_uncorr_samples_per_state: np.ndarray,
-        k: int,
-        **kwargs,
-    ) -> dict:
-        """
-        Run all available free energy estimation methods.
-
-        This provides a comprehensive comparison of all methods on the same data.
-
-        Parameters:
-        -----------
-        lambda_vectors : np.ndarray, shape (num_lambda_states, num_components)
-            Lambda parameter values for each state and component
-        ave_dhdl : np.ndarray, shape (num_lambda_states, num_components)
-            Mean dH/dλ values (already in reduced units)
-        std_dhdl : np.ndarray, shape (num_lambda_states, num_components)
-            Standard error estimates (already in reduced units)
-        uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
-            Reduced potential energy matrix
-        num_uncorr_samples_per_state : np.ndarray, shape (K,)
-            Number of samples from each lambda state
-        k : int
-            Lambda state index (for BAR/EXP methods)
-        **kwargs : dict
-            Additional parameters for specific methods
-
-        Returns:
-        --------
-        Dict : Results from all methods
-            Keys: method names ('TI', 'TI_CUBIC', 'DEXP', 'IEXP', 'GDEL', 'GINS',
-                  'BAR', 'UBAR', 'RBAR', 'MBAR')
-            Values: Individual method result dictionaries
-        """
-        results = {}
-
-        # Thermodynamic Integration methods
-        results['TI'] = self.estimate_ti(
-            lambda_vectors, ave_dhdl, std_dhdl, 'trapezoidal'
-        )
-        results['TI_CUBIC'] = self.estimate_ti(
-            lambda_vectors, ave_dhdl, std_dhdl, 'cubic'
-        )
-
-        # Exponential averaging methods
-        results['DEXP'] = self.estimate_exp(uncorr_potential_energies, k, 'DEXP')
-        results['IEXP'] = self.estimate_exp(uncorr_potential_energies, k, 'IEXP')
-        results['GDEL'] = self.estimate_exp(uncorr_potential_energies, k, 'GDEL')
-        results['GINS'] = self.estimate_exp(uncorr_potential_energies, k, 'GINS')
-
-        # Bennett Acceptance Ratio methods
-        results['BAR'] = self.estimate_bar(
-            uncorr_potential_energies, k, 'BAR', **kwargs
-        )
-        results['UBAR'] = self.estimate_bar(
-            uncorr_potential_energies, k, 'UBAR', **kwargs
-        )
-        results['RBAR'] = self.estimate_bar(
-            uncorr_potential_energies, k, 'RBAR', **kwargs
-        )
-
-        # MBAR method
-        results['MBAR'] = self.estimate_mbar(
-            uncorr_potential_energies, num_uncorr_samples_per_state, **kwargs
-        )
-
-        return results
-
-    def get_method_summary(self, results: dict) -> dict:
-        """
-        Generate a summary of results from multiple methods.
-
-        Parameters:
-        -----------
-        results : dict
-            Results from estimate_all_methods() or similar
-
-        Returns:
-        --------
-        Dict : Summary statistics
-            - 'successful_methods': List of methods that succeeded
-            - 'failed_methods': List of methods that failed
-            - 'mean_free_energy': Mean free energy across successful methods
-            - 'std_free_energy': Standard deviation across successful methods
-            - 'method_agreement': Whether methods agree within error bars
-        """
-        successful = []
-        failed = []
-        free_energies = []
-        errors = []
-
-        for method, result in results.items():
-            if result.get('success', False):
-                successful.append(method)
-                free_energies.append(result['free_energy'])
-                errors.append(result['error'])
-            else:
-                failed.append(method)
-
-        if not free_energies:
-            return {
-                'successful_methods': successful,
-                'failed_methods': failed,
-                'mean_free_energy': None,
-                'std_free_energy': None,
-                'method_agreement': False,
-            }
-
-        free_energies = np.array(free_energies)
-        errors = np.array(errors)
-
-        # Check if methods agree within error bars
-        method_agreement = True
-        if len(free_energies) > 1:
-            for i in range(len(free_energies)):
-                for j in range(i + 1, len(free_energies)):
-                    diff = abs(free_energies[i] - free_energies[j])
-                    combined_error = np.sqrt(errors[i] ** 2 + errors[j] ** 2)
-                    if diff > 2 * combined_error:  # 2-sigma criterion
-                        method_agreement = False
-                        break
-                if not method_agreement:
-                    break
-
-        return {
-            'successful_methods': successful,
-            'failed_methods': failed,
-            'mean_free_energy': np.mean(free_energies),
-            'std_free_energy': np.std(free_energies),
-            'method_agreement': method_agreement,
-            'units': self.units,
-        }
