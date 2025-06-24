@@ -47,3 +47,48 @@ def get_lambda_components_changing(lambda_vectors: np.ndarray) -> np.ndarray:
                 components_changing[lambda_idx + 1, component_idx] = True
 
     return components_changing
+
+
+def calculate_beta_parameter(
+    temperature: float = 298.15, units: str = 'kJ', software: str = 'Gromacs'
+) -> float:
+    """
+    Calculate beta and beta_report parameters exactly as in alchemical_analysis.py:
+    https://github.com/MobleyLab/alchemical-analysis/blob/master/alchemical_analysis/alchemical_analysis.py
+
+    This replicates the checkUnitsAndMore() function logic.
+
+    Parameters:
+    -----------
+    temperature : float, default 298.15
+        Temperature in Kelvin
+    units : str, default 'kJ'
+        Output units: 'kJ', 'kcal', or 'kBT'
+    software : str, default 'Gromacs'
+        Software package name (affects kcal handling)
+
+    Returns:
+    --------
+    tuple[float, float] : (beta, beta_report)
+        beta: 1/(kB*T) in simulation units
+        beta_report: conversion factor for output units
+    """
+    # Boltzmann constant from original (kJ/mol/K)
+    kB = 1.3806488 * 6.02214129 / 1000.0  # Exact value from alchemical_analysis.py
+    beta = 1.0 / (kB * temperature)
+
+    # Check if software uses kcal (Sire, Amber vs Gromacs)
+    b_kcal = software.upper() in ['SIRE', 'AMBER']
+
+    if units.lower() == 'kj':
+        beta_report = beta / (4.184**b_kcal)
+    elif units.lower() == 'kcal':
+        beta_report = (4.184 ** (not b_kcal)) * beta
+    elif units.lower() == 'kbt':
+        beta_report = 1.0
+    else:
+        raise ValueError(
+            f"Unknown units '{units}': only 'kJ', 'kcal', and 'kBT' supported"
+        )
+
+    return beta_report
