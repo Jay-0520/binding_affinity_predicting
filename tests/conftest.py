@@ -1,3 +1,4 @@
+import pickle
 import shutil
 import warnings
 from pathlib import Path
@@ -33,3 +34,14 @@ def example_structures(tmp_path_factory) -> str:
 def out_dir(tmp_path) -> Path:
     """A fresh empty directory for writing outputs."""
     return tmp_path / "out"
+
+
+@pytest.fixture(scope="module")
+def lambda_data() -> tuple:
+    """
+    Load the pickled FEP data once per test session (or skip if missing).
+    Uses the TEST_DATA_DIR defined above.
+    """
+    p = TEST_DATA_DIR / "lambda_data.pkl"
+    with open(p, "rb") as f:
+        return pickle.load(f)

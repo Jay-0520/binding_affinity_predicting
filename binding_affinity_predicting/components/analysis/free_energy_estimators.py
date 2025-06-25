@@ -171,6 +171,8 @@ class ThermodynamicIntegration:
 
     Deriving total free energy differences by integrating dH/dλ over three components in GROMACS
     FEP simulations.
+
+    Very important NOTE: This class does not handle unit conversion directly.
     """
 
     @staticmethod
@@ -222,14 +224,31 @@ class ThermodynamicIntegration:
 
         # Trapezoidal rule: ½ * dλ * (f(λₖ) + f(λₖ₊₁))
         df_contributions = 0.5 * np.sum(dlam * (ave_dhdl[:-1] + ave_dhdl[1:]), axis=1)
-        # Error propagation: ¼ * (dλ)² * (σₖ² + σₖ₊₁²)
-        ddf_sq_contributions = 0.25 * np.sum(
-            dlam**2 * (std_dhdl[:-1] ** 2 + std_dhdl[1:] ** 2), axis=1
-        )
-
         # Sum over all lambda intervals
         total_df = np.sum(df_contributions)
-        total_error = np.sqrt(np.sum(ddf_sq_contributions))
+
+        # Error calculation: match totalEnergies() in alchemical_analysis.py
+        total_error_variance = 0.0
+        # Determine which components change
+        lchange = get_lambda_components_changing(lambda_vectors)
+
+        # For each component j
+        for j in range(lambda_vectors.shape[1]):
+            lj = lchange[:, j]  # States where component j changes
+
+            if np.any(lj):  # If component j changes
+                # Get non-zero intervals for this component
+                dlam_j = np.diff(lambda_vectors[:, j])
+                h = dlam_j[dlam_j != 0]  # Remove zeros like numpy.trim_zeros
+
+                if len(h) > 0:
+                    # Trapezoidal weights: 0.5*(append(h,0) + append(0,h))
+                    wsum = 0.5 * (np.append(h, 0) + np.append(0, h))
+                    # Accumulate variance: dot(wsum**2, std_dhdl[lj,j]**2)
+                    std_j = std_dhdl[lj, j]
+                    total_error_variance += np.dot(wsum**2, std_j**2)
+
+        total_error = np.sqrt(total_error_variance)
 
         return float(total_df), float(total_error)
 
@@ -268,12 +287,12 @@ class ThermodynamicIntegration:
             )
 
         # Determine which components are changing (like get_lchange in original)
-        lambda_components_changing = np.zeros([num_lambda_states, num_components], bool)
-        for j in range(num_components):
-            for k in range(num_lambda_states - 1):
-                if abs(lambda_vectors[k + 1, j] - lambda_vectors[k, j]) > 1e-10:
-                    lambda_components_changing[k, j] = True
-                    lambda_components_changing[k + 1, j] = True
+        # lambda_components_changing = np.zeros([num_lambda_states, num_components], bool)
+        # for j in range(num_components):
+        #     for k in range(num_lambda_states - 1):
+        #         if abs(lambda_vectors[k + 1, j] - lambda_vectors[k, j]) > 1e-10:
+        #             lambda_components_changing[k, j] = True
+        #             lambda_components_changing[k + 1, j] = True
 
         total_df = 0.0
         total_error_sq = 0.0
