@@ -2,9 +2,20 @@
 Test suite for free_energy_estimators.py functions.
 
 Tests are based on reference values from alchemical_analysis.py output
-using the same input data (fep_data.pkl).
+using the same input data (lambda_data.pkl).
 
-Expected results from results.txt:
+lambda_data.pkl is obtained from loading several xvg files through parser_gromacs.py
+
+alchemical_analysis.py is here:
+https://github.com/MobleyLab/alchemical-analysis/blob/master/alchemical_analysis/alchemical_analysis.py
+
+to run this script, e.g., with command:
+   python  alchemical_analysis.py -d 'directory' -p 'lambda' -t 300 -s 0 -u kcal -w -g
+
+we also have to download corruptxvg.py, unixlike.py and parser_gromacs.py in the same directory.
+note that these scripts are very outdated so they must be updated properly to run with new python versions.
+
+Expected results from results.txt (which is outputed by running alchemical_analysis.py):
 - TI: -3.064 ± 9.343 kcal/mol
 - TI-CUBIC: -4.926 ± 11.621 kcal/mol
 - DEXP: 5.590 ± 0.612 kcal/mol
@@ -39,14 +50,14 @@ def ti_data(lambda_data):
     Prepare lambda vectors, <dH/dλ> and std(dH/dλ) (already beta‐scaled)
     for TI tests.
     """
-    lv = lambda_data["lv"]  # shape (n_states, n_components)
-    dhdlt = lambda_data["dhdlt"]  # shape (n_states, n_components, n_samples)
+    lv = lambda_data["lv"]  # shape (n_states, n_components) (5, 3)
+    dhdlt = lambda_data["dhdlt"]  # shape (n_states, n_components, n_samples) (5, 3, 3)
 
     # Boltzmann β for T=300K in kcal/mol:
     temperature = 300.0
     beta = 1.0 / (8.314472e-3 * temperature)
 
-    # average and standard error over time‐series:
+    # average and standard error over time‐series, same as in alchemical_analysis.py
     ave_dhdl = dhdlt.mean(axis=2) * beta
     std_dhdl = dhdlt.std(axis=2, ddof=1) / np.sqrt(dhdlt.shape[2]) * beta
 
@@ -76,17 +87,19 @@ def test_trapezoidal_integration(ti_data):
     assert pytest.approx(9.343, rel=0.05) == ddg_kcal
 
 
-# def test_cubic_spline_integration(ti_data):
-#     lv, ave, std = ti_data
-#     dg, ddg = ThermodynamicIntegration.cubic_spline_integration(lv, ave, std)
+def test_cubic_spline_integration(ti_data):
+    lv, ave, std = ti_data
+    dg, ddg = ThermodynamicIntegration.cubic_spline_integration(lv, ave, std)
+    beta_report = calculate_beta_parameter(
+        temperature=300.0, units='kcal', software='Gromacs'
+    )
+    dg_kcal = dg / beta_report
+    ddg_kcal = ddg / beta_report
 
-#     temperature = 300.0
-#     beta_report = 1.0 / (8.314472e-3 * temperature)
-#     dg_kcal = dg / beta_report
-#     ddg_kcal = ddg / beta_report
+    assert pytest.approx(-4.926, rel=0.05) == dg_kcal
+    assert pytest.approx(11.621, rel=0.20) == ddg_kcal
 
-#     assert pytest.approx(-4.926, rel=0.05) == dg_kcal
-#     assert pytest.approx(11.621, rel=0.20) == ddg_kcal
+
 # @pytest.mark.parametrize(
 #     "lv, ave, std, err_msg",
 #     [

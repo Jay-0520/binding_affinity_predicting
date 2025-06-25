@@ -42,8 +42,9 @@ class NaturalCubicSpline:
             These represent one component of the alchemical transformation pathway
             Variable name matches original: x in naturalcubicspline(x)
         """
-        if len(lambdas_per_component) < 4:
-            raise ValueError("Natural cubic spline requires at least 4 points")
+        # Match original: accept any number of points ≥ 2
+        if len(lambdas_per_component) < 2:
+            raise ValueError("Natural cubic spline requires at least 2 points")
 
         self.x = lambdas_per_component.copy()  # Keep original variable name 'x'
         L = len(lambdas_per_component)
@@ -286,76 +287,36 @@ class ThermodynamicIntegration:
                 lambda_vectors, ave_dhdl, std_dhdl
             )
 
-        # Determine which components are changing (like get_lchange in original)
-        # lambda_components_changing = np.zeros([num_lambda_states, num_components], bool)
-        # for j in range(num_components):
-        #     for k in range(num_lambda_states - 1):
-        #         if abs(lambda_vectors[k + 1, j] - lambda_vectors[k, j]) > 1e-10:
-        #             lambda_components_changing[k, j] = True
-        #             lambda_components_changing[k + 1, j] = True
+        components_changing = get_lambda_components_changing(lambda_vectors)
 
         total_df = 0.0
-        total_error_sq = 0.0
+        total_error_variance = 0.0
+        for j in range(num_components):
+            lj = components_changing[:, j]
 
-        try:
-            # Get boolean mask for all changing components
-            components_changing = get_lambda_components_changing(lambda_vectors)
+            if not np.any(lj):
+                logger.warning(f"Component {j} does not change in any state, skipping.")
+                continue
 
-            # Process each component separately
-            for j in range(num_lambda_states):
-                # Find states where this component changes
-                changing_mask = components_changing[:, j]
+            # Extract lambda values where component j changes (like original)
+            lv_lchange = lambda_vectors[lj, j]
+            ave_j = ave_dhdl[lj, j]
+            std_j = std_dhdl[lj, j]
 
-                if not np.any(changing_mask):
-                    continue  # Component doesn't change
-
-                # Extract data for changing states only
-                lambda_j = lambda_vectors[changing_mask, j]
-                ave_j = ave_dhdl[changing_mask, j]
-                std_j = std_dhdl[changing_mask, j]
-
-                # Integrate this component
-                if len(lambda_j) < 4:
-                    # Use trapezoidal for this component
-                    df_j, ddf_j = ThermodynamicIntegration._trapezoidal_component(
-                        lambda_j, ave_j, std_j
-                    )
-                else:
-                    # Use cubic spline for this component
-                    df_j, ddf_j = ThermodynamicIntegration._cubic_spline_component(
-                        lambda_j, ave_j, std_j
-                    )
+            # Create spline regardless of number of points (like original)
+            try:
+                spline = NaturalCubicSpline(lv_lchange)
+                df_j = np.dot(spline.wsum, ave_j)
+                ddf_j_sq = np.dot(spline.wsum**2, std_j**2)
 
                 total_df += df_j
-                total_error_sq += ddf_j**2
+                total_error_variance += ddf_j_sq
 
-            return float(total_df), float(np.sqrt(total_error_sq))
+            except Exception as e:
+                logger.warning(f"Spline creation failed for component {j}: {e}")
+                continue
 
-        except Exception as e:
-            logger.warning(f"Cubic spline integration failed: {e}, using trapezoidal")
-            return ThermodynamicIntegration.trapezoidal_integration(
-                lambda_vectors, ave_dhdl, std_dhdl
-            )
-
-    @staticmethod
-    def _trapezoidal_component(
-        lambda_vals: np.ndarray, ave_vals: np.ndarray, std_vals: np.ndarray
-    ) -> tuple[float, float]:
-        """Trapezoidal integration for a single component."""
-        dlam = np.diff(lambda_vals)
-        df = 0.5 * np.dot(dlam, ave_vals[:-1] + ave_vals[1:])
-        ddf_sq = 0.25 * np.dot(dlam**2, std_vals[:-1] ** 2 + std_vals[1:] ** 2)
-        return float(df), float(np.sqrt(ddf_sq))
-
-    @staticmethod
-    def _cubic_spline_component(
-        lambda_vals: np.ndarray, ave_vals: np.ndarray, std_vals: np.ndarray
-    ) -> tuple[float, float]:
-        """Cubic spline integration for a single component."""
-        spline = NaturalCubicSpline(lambda_vals)
-        df = np.dot(spline.wsum, ave_vals)
-        ddf_sq = np.dot(spline.wsum**2, std_vals**2)
-        return float(df), float(np.sqrt(ddf_sq))
+        return float(total_df), float(np.sqrt(total_error_variance))
 
 
 class MultistateBAR:
