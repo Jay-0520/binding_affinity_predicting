@@ -1216,7 +1216,6 @@ class MultistateBAR:
                 return (
                     Deltaf_ij[0, K - 1] / beta_report,
                     dDeltaf_ij[0, K - 1] / beta_report,
-                    MBAR,
                 )
 
         except Exception as e:
@@ -1312,16 +1311,15 @@ class MultistateBAR:
                 ]
 
                 result = {
-                    'total_dg': total_dg,
-                    'total_error': total_error,
-                    'free_energies': free_energies,
-                    'free_energy_errors': free_energy_errors,
+                    'free_energy': total_dg,  # name to be consistent with FreeEnergyEstimator
+                    'error': total_error,  # name to be consistent with FreeEnergyEstimator
+                    'free_energies_all': free_energies,
+                    'free_energy_errors_all': free_energy_errors,
                     'Deltaf_ij': Deltaf_ij / beta_report,
                     'dDeltaf_ij': dDeltaf_ij / beta_report,
                     'mbar_object': mbar_object,
                     'n_states': len(num_samples_per_state),
                     'units': unit_string,
-                    'beta_report': beta_report,
                     'temperature': temperature,
                 }
 
@@ -1352,10 +1350,9 @@ class MultistateBAR:
                 ]
 
                 return {
-                    'total_dg': total_dg,
-                    'total_error': total_error,
+                    'free_energy': total_dg,  # name to be consistent with FreeEnergyEstimator
+                    'error': total_error,  # name to be consistent with FreeEnergyEstimator
                     'units': unit_string,
-                    'beta_report': beta_report,
                     'temperature': temperature,
                     'n_states': len(num_samples_per_state),
                 }
@@ -1466,6 +1463,11 @@ class FreeEnergyEstimator:
         self.units = units
         self.software = software
 
+        # Unit for output
+        self.unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
+            units.lower()
+        ]
+
         # Calculate beta_report for unit conversion
         self.beta_report = calculate_beta_parameter(temperature, units, software)
 
@@ -1529,7 +1531,7 @@ class FreeEnergyEstimator:
                 'method': f'TI_{method}',
                 'free_energy': dg,
                 'error': ddg,
-                'units': self.units,
+                'units': self.unit_string,
                 'n_points': len(lambda_vectors),
                 'success': True,
             }
@@ -1605,7 +1607,7 @@ class FreeEnergyEstimator:
                 'method': method.upper(),
                 'free_energy': dg,
                 'error': ddg,
-                'units': self.units,
+                'units': self.unit_string,
                 'success': True,
             }
         except Exception as e:
@@ -1690,7 +1692,7 @@ class FreeEnergyEstimator:
                 'method': method.upper(),
                 'free_energy': dg,
                 'error': ddg,
-                'units': self.units,
+                'units': self.unit_string,
                 'success': True,
             }
         except Exception as e:
