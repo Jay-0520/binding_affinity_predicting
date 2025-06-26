@@ -13,7 +13,8 @@ to run this script, e.g., with command:
    python  alchemical_analysis.py -d 'directory' -p 'lambda' -t 300 -s 0 -u kcal -w -g
 
 we also have to download corruptxvg.py, unixlike.py and parser_gromacs.py in the same directory.
-note that these scripts are very outdated so they must be updated properly to run with new python versions.
+note that these scripts are very outdated so they must be updated properly to run with
+new python versions.
 
 Expected results from results.txt (which is outputed by running alchemical_analysis.py):
 - TI: -3.064 ± 9.343 kcal/mol
@@ -28,22 +29,15 @@ Expected results from results.txt (which is outputed by running alchemical_analy
 - MBAR: 7.561 ± 5.762 kcal/mol
 """
 
-import pickle
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 from binding_affinity_predicting.components.analysis.free_energy_estimators import (
     BennettAcceptanceRatio,
     ExponentialAveraging,
-    FreeEnergyEstimator,
     MultistateBAR,
     NaturalCubicSpline,
     ThermodynamicIntegration,
-)
-from binding_affinity_predicting.components.analysis.utils import (
-    calculate_beta_parameter,
 )
 
 
@@ -77,6 +71,14 @@ def exp_data(lambda_data):
 
 @pytest.fixture
 def bar_data(lambda_data):
+    """
+    Prepare reduced potentials u_klt and snapshot counts for MBAR/EXP/BAR tests.
+    """
+    return lambda_data["u_klt"], lambda_data["nsnapshots"]
+
+
+@pytest.fixture
+def mbar_data(lambda_data):
     """
     Prepare reduced potentials u_klt and snapshot counts for MBAR/EXP/BAR tests.
     """
@@ -170,7 +172,7 @@ def test_spline_insufficient_points():
         NaturalCubicSpline(xs)
 
 
-# ─── Exponential Averaging (EXP, DEXP, IEXP, GDEL, GINS) ────────────────────────
+# ─── Exponential Averaging (DEXP, IEXP, GDEL, GINS) ────────────────────────
 def test_exponential_average_dexp(exp_data):
     """
     Test DEXP calculation using ExponentialAveraging.
@@ -239,39 +241,24 @@ def test_bennett_acceptance_ratio_rbar(bar_data):
     )
 
     assert pytest.approx(7.661, rel=0.001) == dg_kcal
-    assert np.isnan(ddg_kcal)  # RBAR does not provide error estimate   
+    assert np.isnan(ddg_kcal)  # RBAR does not provide error estimate
 
 
-# # ─── Multistate BAR (MBAR) ─────────────────────────────────────────────────────
+# ─── Multistate BAR (MBAR) ─────────────────────────────────────────────────────
+def test_multistate_bar_mbar(mbar_data):
+    """
+    Test MBAR calculation using MultistateBAR.
+    The expected values for MBAR: 7.561 ± 5.762 kcal/mol
+    """
+    u_klt, nsnapshots = mbar_data
+    result = MultistateBAR.compute_mbar(
+        potential_energies=u_klt,
+        num_samples_per_state=nsnapshots,
+        temperature=300.0,
+        units="kcal",
+    )
+    dg_kcal = result['total_dg']
+    ddg_kcal = result['total_error']
 
-# def test_mbar_computation(mbar_data):
-#     u_klt, nsnapshots = mbar_data
-#     results = MultistateBAR.compute_mbar(
-#         u_klt, nsnapshots,
-#         temperature=300.0,
-#         units="kcal",
-#         software="Gromacs",
-#         regular_estimate=True,
-#         compute_overlap=True
-#     )
-#     # top‐level answers
-#     assert pytest.approx(7.561, rel=0.10) == results["total_dg"]
-#     assert pytest.approx(5.762, rel=0.30) == results["total_error"]
-
-#     # overlap matrix
-#     O = results["overlap_matrix"]
-#     assert O.shape == (len(nsnapshots),)*2
-#     np.testing.assert_allclose(np.diag(O), 1.0, atol=1e-3)
-#     np.testing.assert_allclose(O, O.T,  atol=1e-6)
-
-# def test_mbar_simple_estimate(mbar_data):
-#     u_klt, nsnapshots = mbar_data
-#     results = MultistateBAR.compute_mbar(
-#         u_klt, nsnapshots,
-#         temperature=300.0,
-#         units="kcal",
-#         software="Gromacs",
-#         regular_estimate=False
-#     )
-#     assert results["n_states"] == len(nsnapshots)
-#     assert "total_dg" in results and "total_error" in results
+    assert pytest.approx(7.561, rel=0.001) == dg_kcal
+    assert pytest.approx(5.762, rel=0.001) == ddg_kcal

@@ -3,6 +3,7 @@ import shutil
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 TEST_DATA_DIR = Path(__file__).parent / "test_files"
@@ -16,6 +17,45 @@ def pytest_configure():
             message=fr".*builtin type {swig} has no __module__ attribute.*",
             category=DeprecationWarning,
         )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def suppress_warnings():
+    """Autouse fixture to suppress warnings at the session level."""
+    with warnings.catch_warnings():
+        # Suppress the specific pymbar warnings
+        # These are due to specific test data (lambda_data.pkl) and not indicative of code issues
+        # and are from pymbar's internal numerical calculations
+        warnings.filterwarnings("ignore", category=RuntimeWarning, module="pymbar")
+        warnings.filterwarnings(
+            "ignore", message=".*invalid value encountered in sqrt.*"
+        )
+        warnings.filterwarnings(
+            "ignore", message=".*divide by zero encountered in log.*"
+        )
+        warnings.filterwarnings(
+            "ignore", message=".*invalid value encountered in scalar divide.*"
+        )
+
+        # Suppress numpy matrix deprecation warnings from pymbar
+        warnings.filterwarnings(
+            "ignore",
+            message=".*matrix subclass is not the recommended way.*",
+            category=PendingDeprecationWarning,
+        )
+        warnings.filterwarnings(
+            "ignore", category=PendingDeprecationWarning, module="pymbar.*"
+        )
+        warnings.filterwarnings(
+            "ignore", category=PendingDeprecationWarning, module="numpy.matrixlib.*"
+        )
+
+        old_settings = np.seterr(divide='ignore', invalid='ignore')
+
+        try:
+            yield
+        finally:
+            np.seterr(**old_settings)
 
 
 @pytest.fixture(scope="module")

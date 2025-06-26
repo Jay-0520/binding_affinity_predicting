@@ -37,7 +37,8 @@ def _calculate_work_values_all_intervals(
 
     Parameters:
     -----------
-    potential_energies: np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+    potential_energies: np.ndarray, shape (num_lambda_states, num_lambda_states,
+       max_total_snapshots)
         Reduced potential energy matrix
     sample_counts : np.ndarray, shape (num_lambda_states,), optional
         Number of samples per state. If None, inferred from non-zero entries.
@@ -121,7 +122,8 @@ def _calculate_work_value_single_interval(
 
     Parameters:
     -----------
-    potential_energies: np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+    potential_energies: np.ndarray, shape (num_lambda_states, num_lambda_states,
+      max_total_snapshots)
         Reduced potential energy matrix where u_kln[k,m,n] is the reduced
         potential energy of sample n from state k evaluated at state m
     state_i : int
@@ -204,17 +206,19 @@ def _validate_potential_energies(
 
     Parameters:
     -----------
-    potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+    potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
+       max_total_snapshots)
         Reduced potential energy matrix
     sample_counts : np.ndarray, shape (num_lambda_states,), optional
         Number of samples per state
         The potential_energies array is pre-allocated to accommodate the maximum number of snapshots
-        across all states, but not every state necessarily has that many samples. we might need to keep
-        track of how many samples we actually have for each state.
+        across all states, but not every state necessarily has that many samples.
+        we might need to keep track of how many samples we actually have for each state.
     """
     if potential_energies.ndim != 3:
         raise ValueError(
-            "potential_energies must be 3D array (num_lambda_states, num_lambda_states, max_total_snapshots)"
+            "potential_energies must be 3D array (num_lambda_states, num_lambda_states, "
+            "max_total_snapshots)"
         )
 
     num_lambda_states = potential_energies.shape[0]
@@ -644,17 +648,18 @@ class ExponentialAveraging:
     @staticmethod
     def compute_dexp(
         potential_energies: np.ndarray,
-        sample_counts: Optional[np.ndarray] = None,
         temperature: float = 298.15,
         units: str = 'kcal',
         software: str = 'Gromacs',
+        sample_counts: Optional[np.ndarray] = None,
     ) -> tuple[float, float]:
         """
         Compute total DEXP (forward exponential averaging) across all lambda intervals.
 
         Parameters:
         -----------
-        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
+          max_total_snapshots)
             Reduced potential energy matrix
         sample_counts : np.ndarray, shape (num_lambda_states,), optional
             Number of samples per state
@@ -699,17 +704,18 @@ class ExponentialAveraging:
     @staticmethod
     def compute_iexp(
         potential_energies: np.ndarray,
-        sample_counts: Optional[np.ndarray] = None,
         temperature: float = 298.15,
         units: str = 'kcal',
         software: str = 'Gromacs',
+        sample_counts: Optional[np.ndarray] = None,
     ) -> tuple[float, float]:
         """
         Compute total IEXP (reverse exponential averaging) across all lambda intervals.
 
         Parameters:
         -----------
-        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
+          max_total_snapshots)
             Reduced potential energy matrix
         sample_counts : np.ndarray, shape (num_lambda_states,), optional
             Number of samples per state
@@ -754,10 +760,10 @@ class ExponentialAveraging:
     @staticmethod
     def compute_gdel(
         potential_energies: np.ndarray,
-        sample_counts: Optional[np.ndarray] = None,
         temperature: float = 298.15,
         units: str = 'kcal',
         software: str = 'Gromacs',
+        sample_counts: Optional[np.ndarray] = None,
     ) -> tuple[float, float]:
         """
         Compute total GDEL (Gaussian deletion) across all lambda intervals.
@@ -792,10 +798,10 @@ class ExponentialAveraging:
     @staticmethod
     def compute_gins(
         potential_energies: np.ndarray,
-        sample_counts: Optional[np.ndarray] = None,
         temperature: float = 298.15,
         units: str = 'kcal',
         software: str = 'Gromacs',
+        sample_counts: Optional[np.ndarray] = None,
     ) -> tuple[float, float]:
         """
         Compute total GINS (Gaussian insertion) across all lambda intervals.
@@ -905,7 +911,7 @@ class BennettAcceptanceRatio:
                 best_uddf = 0
 
                 # Test trial free energies in the specified range
-                for trial_udf in range(trial_range[0], trial_range[1] + 1, 1):
+                for trial_udf in range(trial_range[0], trial_range[1], 1):
                     try:
                         # Calculate UBAR with this trial free energy as initial guess
                         (udf, uddf) = pymbar.bar.BAR(
@@ -913,7 +919,7 @@ class BennettAcceptanceRatio:
                             w_R,
                             verbose=verbose,
                             iterated_solution=False,
-                            initial_f_k=np.array([0.0, float(trial_udf)]),
+                            DeltaF=float(trial_udf),
                         )
 
                         # Check how well this satisfies the BAR equation
@@ -923,8 +929,10 @@ class BennettAcceptanceRatio:
                             best_udf = udf
                             best_uddf = uddf
 
-                    except Exception:
+                    except Exception as e:
                         # Skip this trial value if it fails
+                        if verbose:
+                            logger.debug(f"RBAR trial {trial_udf} failed: {e}")
                         continue
 
                 if min_diff == 1e6:
@@ -965,7 +973,8 @@ class BennettAcceptanceRatio:
 
         Parameters:
         -----------
-        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
+         max_total_snapshots)
             Reduced potential energy matrix
         sample_counts : np.ndarray, shape (num_lambda_states,), optional
             Number of samples per state
@@ -1139,8 +1148,8 @@ class MultistateBAR:
 
     @staticmethod
     def _estimatewithMBAR_core(
-        uncorr_potential_energies: np.ndarray,
-        num_uncorr_samples_per_state: np.ndarray,
+        potential_energies: np.ndarray,
+        num_samples_per_state: np.ndarray,
         beta_report: float,
         relative_tolerance: float = 1e-10,
         regular_estimate: bool = False,
@@ -1155,10 +1164,10 @@ class MultistateBAR:
 
         Parameters:
         -----------
-        uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
+        potential_energies : np.ndarray, shape (K, K, max_N)
             Reduced potential energy matrix where [k,l,n] is the reduced potential
             of snapshot n from state k evaluated at state l
-        num_uncorr_samples_per_state : np.ndarray, shape (K,)
+        num_samples_per_state : np.ndarray, shape (K,)
             Number of samples from each state k
         relative_tolerance : float, default 1e-10
             Relative tolerance for MBAR convergence
@@ -1181,8 +1190,8 @@ class MultistateBAR:
         try:
             # Initialize MBAR exactly as in original (using original parameter names internally)
             MBAR = pymbar.mbar.MBAR(
-                uncorr_potential_energies,
-                num_uncorr_samples_per_state,
+                potential_energies,
+                num_samples_per_state,
                 verbose=verbose,
                 relative_tolerance=relative_tolerance,
                 initialize=initialize,
@@ -1203,7 +1212,7 @@ class MultistateBAR:
             if regular_estimate:
                 return (Deltaf_ij, dDeltaf_ij, MBAR)
             else:
-                K = len(num_uncorr_samples_per_state)
+                K = len(num_samples_per_state)
                 return (
                     Deltaf_ij[0, K - 1] / beta_report,
                     dDeltaf_ij[0, K - 1] / beta_report,
@@ -1216,8 +1225,8 @@ class MultistateBAR:
 
     @staticmethod
     def compute_mbar(
-        uncorr_potential_energies: np.ndarray,
-        num_uncorr_samples_per_state: np.ndarray,
+        potential_energies: np.ndarray,
+        num_samples_per_state: np.ndarray,
         temperature: float = 298.15,
         units: str = 'kJ',
         software: str = 'Gromacs',
@@ -1230,14 +1239,14 @@ class MultistateBAR:
 
         Parameters:
         -----------
-        uncorr_potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
         max_num_snapshots)
             Reduced potential energy matrix where:
             - First index (k): lambda state where snapshots were generated
             - Second index (l): lambda state where energy is evaluated
             - Third index (n): snapshot/time index
-            Example: uncorr_potential_energies[1, 3, :] = energies of λ₁ snapshots evaluated at λ₃
-        num_uncorr_samples_per_state : np.ndarray, shape (num_lambda_states,)
+            Example: potential_energies[1, 3, :] = energies of λ₁ snapshots evaluated at λ₃
+        num_samples_per_state : np.ndarray, shape (num_lambda_states,)
             Number of samples from each lambda state
         temperature : float, default 298.15
             Temperature in Kelvin
@@ -1277,8 +1286,8 @@ class MultistateBAR:
             if regular_estimate:
                 Deltaf_ij, dDeltaf_ij, mbar_object = (
                     MultistateBAR._estimatewithMBAR_core(
-                        uncorr_potential_energies=uncorr_potential_energies,
-                        num_uncorr_samples_per_state=num_uncorr_samples_per_state,
+                        potential_energies=potential_energies,
+                        num_samples_per_state=num_samples_per_state,
                         relative_tolerance=relative_tolerance,
                         regular_estimate=regular_estimate,
                         verbose=verbose,
@@ -1310,7 +1319,7 @@ class MultistateBAR:
                     'Deltaf_ij': Deltaf_ij / beta_report,
                     'dDeltaf_ij': dDeltaf_ij / beta_report,
                     'mbar_object': mbar_object,
-                    'n_states': len(num_uncorr_samples_per_state),
+                    'n_states': len(num_samples_per_state),
                     'units': unit_string,
                     'beta_report': beta_report,
                     'temperature': temperature,
@@ -1328,8 +1337,8 @@ class MultistateBAR:
             else:
                 # Simple case - returns already converted values
                 total_dg, total_error = MultistateBAR._estimatewithMBAR_core(
-                    uncorr_potential_energies=uncorr_potential_energies,
-                    num_uncorr_samples_per_state=num_uncorr_samples_per_state,
+                    potential_energies=potential_energies,
+                    num_samples_per_state=num_samples_per_state,
                     relative_tolerance=relative_tolerance,
                     regular_estimate=regular_estimate,
                     verbose=verbose,
@@ -1348,7 +1357,7 @@ class MultistateBAR:
                     'units': unit_string,
                     'beta_report': beta_report,
                     'temperature': temperature,
-                    'n_states': len(num_uncorr_samples_per_state),
+                    'n_states': len(num_samples_per_state),
                 }
 
         except Exception as e:
@@ -1373,7 +1382,7 @@ class MultistateBAR:
             num_lambda_states = overlap_matrix.shape[0]
             max_prob = overlap_matrix.max()
 
-            fig, ax = plt.subplots(
+            _, ax = plt.subplots(
                 figsize=(num_lambda_states / 2.0, num_lambda_states / 2.0)
             )
 
@@ -1494,27 +1503,32 @@ class FreeEnergyEstimator:
             - 'success': Whether calculation succeeded
         """
         try:
-            # Perform integration (inputs already in reduced units)
+            # Perform integration using the class methods
             if method.lower() == 'cubic':
-                dg_reduced, ddg_reduced = (
-                    ThermodynamicIntegration.cubic_spline_integration(
-                        lambda_vectors, ave_dhdl, std_dhdl
-                    )
+                dg, ddg = ThermodynamicIntegration.cubic_spline_integration(
+                    lambda_vectors,
+                    ave_dhdl,
+                    std_dhdl,
+                    self.temperature,
+                    self.units,
+                    self.software,
                 )
             elif method.lower() == 'trapezoidal':
-                dg_reduced, ddg_reduced = (
-                    ThermodynamicIntegration.trapezoidal_integration(
-                        lambda_vectors, ave_dhdl, std_dhdl
-                    )
+                dg, ddg = ThermodynamicIntegration.trapezoidal_integration(
+                    lambda_vectors,
+                    ave_dhdl,
+                    std_dhdl,
+                    self.temperature,
+                    self.units,
+                    self.software,
                 )
             else:
                 raise ValueError(f"Unknown TI method: {method}")
 
-            # Convert to physical units using beta_report
             return {
                 'method': f'TI_{method}',
-                'free_energy': dg_reduced / self.beta_report,
-                'error': ddg_reduced / self.beta_report,
+                'free_energy': dg,
+                'error': ddg,
                 'units': self.units,
                 'n_points': len(lambda_vectors),
                 'success': True,
@@ -1525,24 +1539,23 @@ class FreeEnergyEstimator:
 
     def estimate_exp(
         self,
-        u_kln: np.ndarray,
-        k: int,
+        potential_energies: np.ndarray,
         method: str = 'DEXP',
+        sample_counts: Optional[np.ndarray] = None,
     ) -> dict:
         """
         Estimate free energy using exponential averaging methods.
 
-        This method calculates work values from the energy matrix and applies
-        the appropriate exponential averaging method.
+        Uses the new consistent API that takes potential_energies as input.
 
         Parameters:
         -----------
-        u_kln : np.ndarray, shape (K, K, max_N)
+        potential_energies : np.ndarray, shape (K, K, max_N)
             Reduced potential energy matrix (already in reduced units)
-        k : int
-            Lambda state index (for transitions k→k+1)
         method : str, default 'DEXP'
             EXP method ('DEXP', 'IEXP', 'GDEL', 'GINS')
+        sample_counts : np.ndarray, shape (K,), optional
+            Number of samples per state
 
         Returns:
         --------
@@ -1550,33 +1563,41 @@ class FreeEnergyEstimator:
             - 'method': Method used
             - 'free_energy': Free energy difference in specified units
             - 'error': Error estimate in specified units
-            - 'n_samples': Number of samples used
             - 'success': Whether calculation succeeded
         """
         try:
-            # Calculate work values (already in reduced units)
-            w_F, w_R = ExponentialAveraging.calculate_work_values(u_kln, k)
-
             if method.upper() == 'DEXP':
-                dg, ddg = ExponentialAveraging.forward_exp(
-                    w_F, self.temperature, self.units, self.software
+                dg, ddg = ExponentialAveraging.compute_dexp(
+                    potential_energies,
+                    self.temperature,
+                    self.units,
+                    self.software,
+                    sample_counts,
                 )
-                n_samples = len(w_F)
             elif method.upper() == 'IEXP':
-                dg, ddg = ExponentialAveraging.reverse_exp(
-                    w_R, self.temperature, self.units, self.software
+                dg, ddg = ExponentialAveraging.compute_iexp(
+                    potential_energies,
+                    self.temperature,
+                    self.units,
+                    self.software,
+                    sample_counts,
                 )
-                n_samples = len(w_R)
             elif method.upper() == 'GDEL':
-                dg, ddg = ExponentialAveraging.gaussian_deletion(
-                    w_F, self.temperature, self.units, self.software
+                dg, ddg = ExponentialAveraging.compute_gdel(
+                    potential_energies,
+                    self.temperature,
+                    self.units,
+                    self.software,
+                    sample_counts,
                 )
-                n_samples = len(w_F)
             elif method.upper() == 'GINS':
-                dg, ddg = ExponentialAveraging.gaussian_insertion(
-                    w_R, self.temperature, self.units, self.software
+                dg, ddg = ExponentialAveraging.compute_gins(
+                    potential_energies,
+                    self.temperature,
+                    self.units,
+                    self.software,
+                    sample_counts,
                 )
-                n_samples = len(w_R)
             else:
                 raise ValueError(f"Unknown EXP method: {method}")
 
@@ -1585,7 +1606,6 @@ class FreeEnergyEstimator:
                 'free_energy': dg,
                 'error': ddg,
                 'units': self.units,
-                'n_samples': n_samples,
                 'success': True,
             }
         except Exception as e:
@@ -1598,30 +1618,32 @@ class FreeEnergyEstimator:
 
     def estimate_bar(
         self,
-        u_kln: np.ndarray,
-        k: int,
+        potential_energies: np.ndarray,
         method: str = 'BAR',
+        sample_counts: Optional[np.ndarray] = None,
         relative_tolerance: float = 1e-10,
         verbose: bool = False,
+        trial_range: tuple = (-10, 10),
     ) -> dict:
         """
         Estimate free energy using Bennett Acceptance Ratio methods.
 
-        This method calculates work values from the energy matrix and applies
-        the appropriate BAR method.
+        Uses the new consistent API that takes potential_energies as input.
 
         Parameters:
         -----------
-        u_kln : np.ndarray, shape (K, K, max_N)
+        potential_energies : np.ndarray, shape (K, K, max_N)
             Reduced potential energy matrix (already in reduced units)
-        k : int
-            Lambda state index (for transitions k→k+1)
         method : str, default 'BAR'
             BAR method ('BAR', 'UBAR', 'RBAR')
+        sample_counts : np.ndarray, shape (K,), optional
+            Number of samples per state
         relative_tolerance : float, default 1e-10
             Convergence tolerance for BAR iteration
         verbose : bool, default False
             Enable verbose output
+        trial_range : tuple, default (-10, 10)
+            Range for RBAR method
 
         Returns:
         --------
@@ -1629,18 +1651,13 @@ class FreeEnergyEstimator:
             - 'method': Method used
             - 'free_energy': Free energy difference in specified units
             - 'error': Error estimate in specified units
-            - 'n_forward': Number of forward samples
-            - 'n_reverse': Number of reverse samples
             - 'success': Whether calculation succeeded
         """
         try:
-            # Calculate work values (already in reduced units)
-            w_F, w_R = BennettAcceptanceRatio.calculate_work_values(u_kln, k)
-
             if method.upper() == 'BAR':
-                dg, ddg = BennettAcceptanceRatio.bar(
-                    w_F,
-                    w_R,
+                dg, ddg = BennettAcceptanceRatio.compute_bar(
+                    potential_energies,
+                    sample_counts,
                     self.temperature,
                     self.units,
                     self.software,
@@ -1648,12 +1665,23 @@ class FreeEnergyEstimator:
                     verbose,
                 )
             elif method.upper() == 'UBAR':
-                dg, ddg = BennettAcceptanceRatio.ubar(
-                    w_F, w_R, self.temperature, self.units, self.software, verbose
+                dg, ddg = BennettAcceptanceRatio.compute_ubar(
+                    potential_energies,
+                    sample_counts,
+                    self.temperature,
+                    self.units,
+                    self.software,
+                    verbose,
                 )
             elif method.upper() == 'RBAR':
-                dg, ddg = BennettAcceptanceRatio.rbar(
-                    w_F, w_R, self.temperature, self.units, self.software, verbose
+                dg, ddg = BennettAcceptanceRatio.compute_rbar(
+                    potential_energies,
+                    sample_counts,
+                    self.temperature,
+                    self.units,
+                    self.software,
+                    verbose,
+                    trial_range,
                 )
             else:
                 raise ValueError(f"Unknown BAR method: {method}")
@@ -1663,8 +1691,6 @@ class FreeEnergyEstimator:
                 'free_energy': dg,
                 'error': ddg,
                 'units': self.units,
-                'n_forward': len(w_F),
-                'n_reverse': len(w_R),
                 'success': True,
             }
         except Exception as e:
@@ -1677,8 +1703,8 @@ class FreeEnergyEstimator:
 
     def estimate_mbar(
         self,
-        uncorr_potential_energies: np.ndarray,
-        num_uncorr_samples_per_state: np.ndarray,
+        potential_energies: np.ndarray,
+        num_samples_per_state: np.ndarray,
         regular_estimate: bool = True,
         **kwargs,
     ) -> dict:
@@ -1687,9 +1713,9 @@ class FreeEnergyEstimator:
 
         Parameters:
         -----------
-        uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
+        potential_energies : np.ndarray, shape (K, K, max_N)
             Reduced potential energy matrix (already in reduced units)
-        num_uncorr_samples_per_state : np.ndarray, shape (K,)
+        num_samples_per_state : np.ndarray, shape (K,)
             Number of samples from each lambda state
         regular_estimate : bool, default True
             If True, return detailed results; if False, return simple endpoint result
@@ -1702,8 +1728,8 @@ class FreeEnergyEstimator:
         """
         try:
             result = MultistateBAR.compute_mbar(
-                uncorr_potential_energies,
-                num_uncorr_samples_per_state,
+                potential_energies,
+                num_samples_per_state,
                 temperature=self.temperature,
                 units=self.units,
                 software=self.software,
@@ -1716,3 +1742,134 @@ class FreeEnergyEstimator:
         except Exception as e:
             logger.error(f"MBAR estimation failed: {e}")
             return {'method': 'MBAR', 'success': False, 'error_message': str(e)}
+
+    def estimate_all_methods(
+        self,
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
+        lambda_vectors: Optional[np.ndarray] = None,
+        ave_dhdl: Optional[np.ndarray] = None,
+        std_dhdl: Optional[np.ndarray] = None,
+        methods: Optional[list] = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Estimate free energy using all available methods.
+
+        Parameters:
+        -----------
+        potential_energies : np.ndarray, shape (K, K, max_N)
+            Reduced potential energy matrix
+        sample_counts : np.ndarray, shape (K,), optional
+            Number of samples per state
+        lambda_vectors : np.ndarray, shape (K, n_components), optional
+            Lambda vectors for TI methods
+        ave_dhdl : np.ndarray, shape (K, n_components), optional
+            Average dH/dλ for TI methods
+        std_dhdl : np.ndarray, shape (K, n_components), optional
+            Standard error of dH/dλ for TI methods
+        methods : list, optional
+            List of methods to run. If None, runs all available methods.
+        **kwargs : dict
+            Additional parameters for individual methods
+
+        Returns:
+        --------
+        Dict : Results from all methods
+            Keys are method names, values are result dictionaries
+        """
+        if methods is None:
+            methods = ['DEXP', 'IEXP', 'GDEL', 'GINS', 'BAR', 'UBAR', 'RBAR', 'MBAR']
+            if (
+                lambda_vectors is not None
+                and ave_dhdl is not None
+                and std_dhdl is not None
+            ):
+                methods.extend(['TI_trapezoidal', 'TI_cubic'])
+
+        results = {}
+
+        # Exponential averaging methods
+        for method in ['DEXP', 'IEXP', 'GDEL', 'GINS']:
+            if method in methods:
+                try:
+                    results[method] = self.estimate_exp(
+                        potential_energies, method, sample_counts
+                    )
+                except Exception as e:
+                    results[method] = {
+                        'method': method,
+                        'success': False,
+                        'error_message': str(e),
+                    }
+
+        # BAR methods
+        for method in ['BAR', 'UBAR', 'RBAR']:
+            if method in methods:
+                try:
+                    results[method] = self.estimate_bar(
+                        potential_energies,
+                        method,
+                        sample_counts,
+                        **{
+                            k: v
+                            for k, v in kwargs.items()
+                            if k in ['relative_tolerance', 'verbose', 'trial_range']
+                        },
+                    )
+                except Exception as e:
+                    results[method] = {
+                        'method': method,
+                        'success': False,
+                        'error_message': str(e),
+                    }
+
+        # MBAR method
+        if 'MBAR' in methods:
+            try:
+                if sample_counts is not None:
+                    results['MBAR'] = self.estimate_mbar(
+                        potential_energies,
+                        sample_counts,
+                        **{
+                            k: v
+                            for k, v in kwargs.items()
+                            if k
+                            in [
+                                'regular_estimate',
+                                'relative_tolerance',
+                                'verbose',
+                                'initialize',
+                            ]
+                        },
+                    )
+                else:
+                    results['MBAR'] = {
+                        'method': 'MBAR',
+                        'success': False,
+                        'error_message': 'MBAR requires sample_counts',
+                    }
+            except Exception as e:
+                results['MBAR'] = {
+                    'method': 'MBAR',
+                    'success': False,
+                    'error_message': str(e),
+                }
+
+        # TI methods
+        if lambda_vectors is not None and ave_dhdl is not None and std_dhdl is not None:
+            for ti_method in ['trapezoidal', 'cubic']:
+                method_name = f'TI_{ti_method}'
+                if method_name in methods:
+                    try:
+                        results[method_name] = self.estimate_ti(
+                            lambda_vectors, ave_dhdl, std_dhdl, ti_method
+                        )
+                    except Exception as e:
+                        results[method_name] = {
+                            'method': method_name,
+                            'success': False,
+                            'error_message': str(e),
+                        }
+
+        return results
