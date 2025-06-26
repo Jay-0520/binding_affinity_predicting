@@ -1,4 +1,10 @@
+import logging
+from typing import Optional
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def get_lambda_components_changing(lambda_vectors: np.ndarray) -> np.ndarray:

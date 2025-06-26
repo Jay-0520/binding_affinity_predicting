@@ -27,6 +27,210 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def _calculate_work_values_all_intervals(
+    potential_energies: np.ndarray, sample_counts: Optional[np.ndarray] = None
+) -> tuple[list, list]:
+    """
+    Calculate forward and reverse work values for all lambda intervals.
+
+    Better to use uncorrelated potential energies to get more accurate results.
+
+    Parameters:
+    -----------
+    potential_energies: np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+        Reduced potential energy matrix
+    sample_counts : np.ndarray, shape (num_lambda_states,), optional
+        Number of samples per state. If None, inferred from non-zero entries.
+
+    Returns:
+    --------
+    Tuple[list, list] : (w_F_all, w_R_all)
+        Lists of work values for each interval lambda_state_i → lambda_state_i+1
+    """
+    num_lambda_states = potential_energies.shape[0]
+    w_F_all = []
+    w_R_all = []
+
+    logger.info(f"Calculating work values for {num_lambda_states-1} lambda intervals")
+
+    for lambda_state_i in range(num_lambda_states - 1):
+        lambda_state_j = lambda_state_i + 1
+
+        try:
+            # Extract sample counts if provided
+            n_samples_i = (
+                sample_counts[lambda_state_i] if sample_counts is not None else None
+            )
+            n_samples_j = (
+                sample_counts[lambda_state_j] if sample_counts is not None else None
+            )
+
+            # Calculate work values for this interval
+            w_F, w_R = _calculate_work_value_single_interval(
+                potential_energies,
+                lambda_state_i,
+                lambda_state_j,
+                n_samples_i,
+                n_samples_j,
+            )
+
+            # Validate results
+            if len(w_F) == 0 or len(w_R) == 0:
+                logger.warning(
+                    f"Empty work arrays for interval {lambda_state_i}→{lambda_state_j}"
+                )
+                w_F_all.append(np.array([]))
+                w_R_all.append(np.array([]))
+            else:
+                w_F_all.append(w_F)
+                w_R_all.append(w_R)
+                logger.debug(
+                    f"Interval {lambda_state_i}→{lambda_state_j}: "
+                    f"{len(w_F)} forward, {len(w_R)} reverse work values"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to calculate work values for interval "
+                f"{lambda_state_i}→{lambda_state_j}: {e}"
+            )
+            # Add empty arrays to maintain list structure
+            w_F_all.append(np.array([]))
+            w_R_all.append(np.array([]))
+
+    logger.info(
+        f"Successfully calculated work values for "
+        f"{sum(1 for w_F in w_F_all if len(w_F) > 0)}/{num_lambda_states-1} intervals"
+    )
+
+    return w_F_all, w_R_all
+
+
+def _calculate_work_value_single_interval(
+    potential_energies: np.ndarray,
+    state_i: int,
+    state_j: int,
+    n_samples_i: Optional[int] = None,
+    n_samples_j: Optional[int] = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate forward and reverse work values for a single lambda interval.
+
+    This function implements the work value calculations exactly as done in
+    the original alchemical_analysis.py script.
+
+    Parameters:
+    -----------
+    potential_energies: np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+        Reduced potential energy matrix where u_kln[k,m,n] is the reduced
+        potential energy of sample n from state k evaluated at state m
+    state_i : int
+        Index of the initial lambda state
+    state_j : int
+        Index of the final lambda state
+    n_samples_i : int, optional
+        Number of samples from state i. If None, auto-detected from non-zero entries
+    n_samples_j : int, optional
+        Number of samples from state j. If None, auto-detected from non-zero entries
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        (w_F, w_R) where:
+        - w_F: Forward work values (state_i → state_j)
+        - w_R: Reverse work values (state_j → state_i)
+
+    Raises
+    ------
+    ValueError
+        If state indices are invalid or no samples are found
+    """
+    num_lambda_states = potential_energies.shape[0]
+    if state_i < 0 or state_i >= num_lambda_states:
+        raise ValueError(
+            f"Invalid state_i: {state_i} (must be 0 <= state_i < {num_lambda_states})"
+        )
+    if state_j < 0 or state_j >= num_lambda_states:
+        raise ValueError(
+            f"Invalid state_j: {state_j} (must be 0 <= state_j < {num_lambda_states})"
+        )
+
+    # Auto-detect sample counts if not provided
+    if n_samples_i is None:
+        # Count non-zero entries in diagonal (assuming 0 means no data)
+        # Note: Self-energies should never legitimately be zero in real simulations
+        n_samples_i = np.sum(potential_energies[state_i, state_i, :] != 0)
+
+    if n_samples_j is None:
+        n_samples_j = np.sum(potential_energies[state_j, state_j, :] != 0)
+
+    # Validate sample counts
+    if n_samples_i <= 0:
+        raise ValueError(f"No samples found for state {state_i}")
+    if n_samples_j <= 0:
+        raise ValueError(f"No samples found for state {state_j}")
+
+    # Check array bounds
+    max_samples = potential_energies.shape[2]
+    if n_samples_i > max_samples:
+        raise ValueError(
+            f"n_samples_i ({n_samples_i}) exceeds array size ({max_samples})"
+        )
+    if n_samples_j > max_samples:
+        raise ValueError(
+            f"n_samples_j ({n_samples_j}) exceeds array size ({max_samples})"
+        )
+
+    # Calculate forward work: samples from state_i evaluated at states i and j
+    w_F = (
+        potential_energies[state_i, state_j, :n_samples_i]
+        - potential_energies[state_i, state_i, :n_samples_i]
+    )
+
+    # Calculate reverse work: samples from state_j evaluated at states j and i
+    w_R = (
+        potential_energies[state_j, state_i, :n_samples_j]
+        - potential_energies[state_j, state_j, :n_samples_j]
+    )
+
+    return w_F, w_R
+
+
+def _validate_potential_energies(
+    potential_energies: np.ndarray, sample_counts: Optional[np.ndarray] = None
+) -> None:
+    """
+    Validate potential energy matrix and sample counts.
+
+    Parameters:
+    -----------
+    potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+        Reduced potential energy matrix
+    sample_counts : np.ndarray, shape (num_lambda_states,), optional
+        Number of samples per state
+        The potential_energies array is pre-allocated to accommodate the maximum number of snapshots
+        across all states, but not every state necessarily has that many samples. we might need to keep
+        track of how many samples we actually have for each state.
+    """
+    if potential_energies.ndim != 3:
+        raise ValueError(
+            "potential_energies must be 3D array (num_lambda_states, num_lambda_states, max_total_snapshots)"
+        )
+
+    num_lambda_states = potential_energies.shape[0]
+    if potential_energies.shape[1] != num_lambda_states:
+        raise ValueError("potential_energies must be square in first two dimensions")
+
+    if num_lambda_states < 2:
+        raise ValueError("Need at least 2 lambda states")
+
+    if sample_counts is not None:
+        if len(sample_counts) != num_lambda_states:
+            raise ValueError("sample_counts must have same length as number of states")
+        if np.any(sample_counts < 0):
+            raise ValueError("sample_counts must be non-negative")
+
+
 class NaturalCubicSpline:
     """
     Natural cubic spline implementation adapted from alchemical_analysis.py.
@@ -369,111 +573,6 @@ class ExponentialAveraging:
     """
 
     @staticmethod
-    def _validate_potential_energies(
-        potential_energies: np.ndarray, sample_counts: Optional[np.ndarray] = None
-    ) -> None:
-        """
-        Validate potential energy matrix and sample counts.
-
-        Parameters:
-        -----------
-        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
-            Reduced potential energy matrix
-        sample_counts : np.ndarray, shape (num_lambda_states,), optional
-            Number of samples per state
-            The potential_energies array is pre-allocated to accommodate the maximum number of snapshots
-            across all states, but not every state necessarily has that many samples. we might need to keep
-            track of how many samples we actually have for each state.
-        """
-        if potential_energies.ndim != 3:
-            raise ValueError(
-                "potential_energies must be 3D array (num_lambda_states, num_lambda_states, max_total_snapshots)"
-            )
-
-        num_lambda_states = potential_energies.shape[0]
-        if potential_energies.shape[1] != num_lambda_states:
-            raise ValueError(
-                "potential_energies must be square in first two dimensions"
-            )
-
-        if num_lambda_states < 2:
-            raise ValueError("Need at least 2 lambda states")
-
-        if sample_counts is not None:
-            if len(sample_counts) != num_lambda_states:
-                raise ValueError(
-                    "sample_counts must have same length as number of states"
-                )
-            if np.any(sample_counts < 0):
-                raise ValueError("sample_counts must be non-negative")
-
-    @staticmethod
-    def _calculate_work_values_all_intervals(
-        potential_energies: np.ndarray, sample_counts: Optional[np.ndarray] = None
-    ) -> tuple[list, list]:
-        """
-        Calculate forward and reverse work values for all lambda intervals.
-
-        Parameters:
-        -----------
-        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
-            Reduced potential energy matrix
-        sample_counts : np.ndarray, shape (num_lambda_states,), optional
-            Number of samples per state. If None, inferred from non-zero entries.
-
-        Returns:
-        --------
-        Tuple[list, list] : (w_F_all, w_R_all)
-            Lists of work values for each interval lambda_state_i → lambda_state_i+1
-        """
-        num_lambda_states = potential_energies.shape[0]
-        w_F_all = []
-        w_R_all = []
-
-        for lambda_state_i in range(num_lambda_states - 1):
-            lambda_state_j = lambda_state_i + 1
-
-            # Determine number of samples for each state
-            if sample_counts is not None:
-                n_samples_i = sample_counts[lambda_state_i]
-                n_samples_j = sample_counts[lambda_state_j]
-            else:
-                # Infer from non-zero entries (assuming 0 means no data)
-                # TODO: contains the energies of samples from state i evaluated at their own state i
-                # assume that these should never legitimately be zero in real simulations
-                n_samples_i = np.sum(
-                    potential_energies[lambda_state_i, lambda_state_i, :] != 0
-                )
-                n_samples_j = np.sum(
-                    potential_energies[lambda_state_j, lambda_state_j, :] != 0
-                )
-
-            if n_samples_i == 0 or n_samples_j == 0:
-                logger.warning(
-                    f"No samples found for interval {lambda_state_i}→{lambda_state_j}, skipping"
-                )
-                w_F_all.append(np.array([]))
-                w_R_all.append(np.array([]))
-                continue
-
-            # Forward work: u_kln[i,j,0:n_i] - u_kln[i,i,0:n_i]
-            w_F = (
-                potential_energies[lambda_state_i, lambda_state_j, 0:n_samples_i]
-                - potential_energies[lambda_state_i, lambda_state_i, 0:n_samples_i]
-            )
-
-            # Reverse work: u_kln[j,i,0:n_j] - u_kln[j,j,0:n_j]
-            w_R = (
-                potential_energies[lambda_state_j, lambda_state_i, 0:n_samples_j]
-                - potential_energies[lambda_state_j, lambda_state_j, 0:n_samples_j]
-            )
-
-            w_F_all.append(w_F)
-            w_R_all.append(w_R)
-
-        return w_F_all, w_R_all
-
-    @staticmethod
     def _calculate_interval_free_energy(
         work_values: np.ndarray,
         method: str,
@@ -540,7 +639,7 @@ class ExponentialAveraging:
             logger.warning(
                 f"pymbar {method} failed: {e}, using simple exponential averaging"
             )
-            raise ValueError(f"pymbar {method} failed with error: {e}")
+            raise
 
     @staticmethod
     def compute_dexp(
@@ -570,12 +669,10 @@ class ExponentialAveraging:
         --------
         Tuple[float, float] : (total_free_energy, total_error) in specified units
         """
-        ExponentialAveraging._validate_potential_energies(
-            potential_energies, sample_counts
-        )
+        _validate_potential_energies(potential_energies, sample_counts)
 
         # Calculate work values for all intervals
-        w_F_all, _ = ExponentialAveraging._calculate_work_values_all_intervals(
+        w_F_all, _ = _calculate_work_values_all_intervals(
             potential_energies, sample_counts
         )
 
@@ -627,12 +724,10 @@ class ExponentialAveraging:
         --------
         Tuple[float, float] : (total_free_energy, total_error) in specified units
         """
-        ExponentialAveraging._validate_potential_energies(
-            potential_energies, sample_counts
-        )
+        _validate_potential_energies(potential_energies, sample_counts)
 
         # Calculate work values for all intervals
-        _, w_R_all = ExponentialAveraging._calculate_work_values_all_intervals(
+        _, w_R_all = _calculate_work_values_all_intervals(
             potential_energies, sample_counts
         )
 
@@ -669,11 +764,9 @@ class ExponentialAveraging:
 
         Parameters and returns same as compute_dexp.
         """
-        ExponentialAveraging._validate_potential_energies(
-            potential_energies, sample_counts
-        )
+        _validate_potential_energies(potential_energies, sample_counts)
 
-        w_F_all, _ = ExponentialAveraging._calculate_work_values_all_intervals(
+        w_F_all, _ = _calculate_work_values_all_intervals(
             potential_energies, sample_counts
         )
 
@@ -709,11 +802,9 @@ class ExponentialAveraging:
 
         Parameters and returns same as compute_iexp.
         """
-        ExponentialAveraging._validate_potential_energies(
-            potential_energies, sample_counts
-        )
+        _validate_potential_energies(potential_energies, sample_counts)
 
-        _, w_R_all = ExponentialAveraging._calculate_work_values_all_intervals(
+        _, w_R_all = _calculate_work_values_all_intervals(
             potential_energies, sample_counts
         )
 
@@ -737,7 +828,6 @@ class ExponentialAveraging:
         return total_dg, total_error
 
 
-# TODO: need to double check this implementation
 class BennettAcceptanceRatio:
     """
     Bennett Acceptance Ratio methods adapted from alchemical_analysis.py.
@@ -745,18 +835,19 @@ class BennettAcceptanceRatio:
     """
 
     @staticmethod
-    def bar(
+    def _calculate_interval_free_energy(
         w_F: np.ndarray,
         w_R: np.ndarray,
+        method: str,
         temperature: float = 298.15,
         units: str = 'kJ',
         software: str = 'Gromacs',
         relative_tolerance: float = 1e-10,
         verbose: bool = False,
+        trial_range: tuple = (-10, 10),
     ) -> tuple[float, float]:
         """
-        Bennett Acceptance Ratio (BAR) method.
-        Exactly adapted from alchemical_analysis.py BAR implementation.
+        Calculate free energy for a single interval using specified BAR method.
 
         Parameters:
         -----------
@@ -766,6 +857,8 @@ class BennettAcceptanceRatio:
         w_R : np.ndarray
             Reverse work values: w_R = u_kln[k+1,k,:] - u_kln[k+1,k+1,:]
             These should already be in reduced units!
+        method : str
+            Method to use: 'BAR', 'UBAR', or 'RBAR'
         temperature : float
             Temperature in Kelvin (for unit conversion only)
         units : str
@@ -776,88 +869,209 @@ class BennettAcceptanceRatio:
             Convergence tolerance for BAR iteration
         verbose : bool
             Enable verbose output
+        trial_range : tuple
+            Range of trial free energy values for RBAR (in reduced units)
 
         Returns:
         --------
         Tuple[float, float] : (free_energy, error) in specified units
         """
-        try:
-            # Original implementation - work values are already in reduced units
-            (df_reduced, ddf_reduced) = pymbar.bar.BAR(
-                w_F, w_R, relative_tolerance=relative_tolerance, verbose=verbose
-            )
+        if len(w_F) == 0 or len(w_R) == 0:
+            return 0.0, 0.0
 
-            # Convert to physical units using beta_report
-            beta_report = calculate_beta_parameter(temperature, units, software)
+        # Calculate beta_report for unit conversion
+        beta_report = calculate_beta_parameter(temperature, units, software)
+
+        try:
+            if method == 'BAR':
+                # Standard BAR with iteration
+                (df_reduced, ddf_reduced) = pymbar.bar.BAR(
+                    w_F, w_R, relative_tolerance=relative_tolerance, verbose=verbose
+                )
+
+            elif method == 'UBAR':
+                # Unoptimized BAR - assume dF is zero, just do one evaluation
+                (df_reduced, ddf_reduced) = pymbar.bar.BAR(
+                    w_F,
+                    w_R,
+                    verbose=verbose,
+                    iterated_solution=False,  # Key difference from BAR
+                )
+
+            elif method == 'RBAR':
+                # Range-based BAR - test multiple trial values
+                min_diff = 1e6
+                best_udf = 0
+                best_uddf = 0
+
+                # Test trial free energies in the specified range
+                for trial_udf in range(trial_range[0], trial_range[1] + 1, 1):
+                    try:
+                        # Calculate UBAR with this trial free energy as initial guess
+                        (udf, uddf) = pymbar.bar.BAR(
+                            w_F,
+                            w_R,
+                            verbose=verbose,
+                            iterated_solution=False,
+                            initial_f_k=np.array([0.0, float(trial_udf)]),
+                        )
+
+                        # Check how well this satisfies the BAR equation
+                        diff = abs(udf - trial_udf)
+                        if diff < min_diff:
+                            min_diff = diff
+                            best_udf = udf
+                            best_uddf = uddf
+
+                    except Exception:
+                        # Skip this trial value if it fails
+                        continue
+
+                if min_diff == 1e6:
+                    # All trials failed, fall back to standard BAR
+                    logger.warning("All RBAR trials failed, falling back to BAR")
+                    (df_reduced, ddf_reduced) = pymbar.bar.BAR(
+                        w_F, w_R, relative_tolerance=relative_tolerance, verbose=verbose
+                    )
+                else:
+                    df_reduced = best_udf
+                    ddf_reduced = best_uddf
+
+            else:
+                raise ValueError(f"Unknown BAR method: {method}")
+
+            # Convert to physical units
             df_physical = df_reduced / beta_report
             ddf_physical = ddf_reduced / beta_report
 
             return df_physical, ddf_physical
 
         except Exception as e:
-            logger.error(f"pymbar BAR failed: {e}")
+            logger.error(f"pymbar {method} failed: {e}")
             raise
 
     @staticmethod
-    def ubar(
-        w_F: np.ndarray,
-        w_R: np.ndarray,
+    def compute_bar(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
+        temperature: float = 298.15,
+        units: str = 'kJ',
+        software: str = 'Gromacs',
+        relative_tolerance: float = 1e-10,
+        verbose: bool = False,
+    ) -> tuple[float, float]:
+        """
+        Compute total BAR estimate across all lambda intervals.
+
+        Parameters:
+        -----------
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+            Reduced potential energy matrix
+        sample_counts : np.ndarray, shape (num_lambda_states,), optional
+            Number of samples per state
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kJ'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name
+        relative_tolerance : float, default 1e-10
+            Convergence tolerance for BAR iteration
+        verbose : bool, default False
+            Enable verbose output
+
+        Returns:
+        --------
+        Tuple[float, float] : (total_free_energy, total_error) in specified units
+        """
+        _validate_potential_energies(potential_energies, sample_counts)
+
+        # Calculate work values for all intervals
+        w_F_all, w_R_all = _calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
+
+        # Calculate free energy for each interval
+        total_dg = 0.0
+        total_error_variance = 0.0
+
+        for lambda_state_i, (w_F, w_R) in enumerate(zip(w_F_all, w_R_all)):
+            if len(w_F) == 0 or len(w_R) == 0:
+                logger.warning(
+                    f"No work values for interval {lambda_state_i}→{lambda_state_i+1}"
+                )
+                continue
+
+            dg_interval, ddg_interval = (
+                BennettAcceptanceRatio._calculate_interval_free_energy(
+                    w_F,
+                    w_R,
+                    'BAR',
+                    temperature,
+                    units,
+                    software,
+                    relative_tolerance,
+                    verbose,
+                )
+            )
+
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
+
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
+
+    @staticmethod
+    def compute_ubar(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
         temperature: float = 298.15,
         units: str = 'kJ',
         software: str = 'Gromacs',
         verbose: bool = False,
     ) -> tuple[float, float]:
         """
-        Unoptimized Bennett Acceptance Ratio (UBAR) method.
-        Exactly adapted from alchemical_analysis.py UBAR implementation.
+        Compute total UBAR estimate across all lambda intervals.
 
         UBAR assumes dF is zero and does only one evaluation (no iteration).
 
-        Parameters:
-        -----------
-        w_F : np.ndarray
-            Forward work values: w_F = u_kln[k,k+1,:] - u_kln[k,k,:]
-            These should already be in reduced units!
-        w_R : np.ndarray
-            Reverse work values: w_R = u_kln[k+1,k,:] - u_kln[k+1,k+1,:]
-            These should already be in reduced units!
-        temperature : float
-            Temperature in Kelvin (for unit conversion only)
-        units : str
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str
-            Software package name
-        verbose : bool
-            Enable verbose output
-
-        Returns:
-        --------
-        Tuple[float, float] : (free_energy, error) in specified units
+        Parameters same as compute_bar (excluding relative_tolerance).
+        Returns same as compute_bar.
         """
-        try:
-            # Original implementation - assume dF is zero, just do one evaluation
-            (df_reduced, ddf_reduced) = pymbar.bar.BAR(
-                w_F,
-                w_R,
-                verbose=verbose,
-                iterated_solution=False,  # This is the key difference from BAR
+        _validate_potential_energies(potential_energies, sample_counts)
+
+        # Calculate work values for all intervals
+        w_F_all, w_R_all = _calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
+
+        # Calculate free energy for each interval
+        total_dg = 0.0
+        total_error_variance = 0.0
+
+        for lambda_state_i, (w_F, w_R) in enumerate(zip(w_F_all, w_R_all)):
+            if len(w_F) == 0 or len(w_R) == 0:
+                logger.warning(
+                    f"No work values for interval {lambda_state_i}→{lambda_state_i+1}"
+                )
+                continue
+
+            dg_interval, ddg_interval = (
+                BennettAcceptanceRatio._calculate_interval_free_energy(
+                    w_F, w_R, 'UBAR', temperature, units, software, verbose=verbose
+                )
             )
 
-            # Convert to physical units using beta_report
-            beta_report = calculate_beta_parameter(temperature, units, software)
-            df_physical = df_reduced / beta_report
-            ddf_physical = ddf_reduced / beta_report
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
 
-            return df_physical, ddf_physical
-
-        except Exception as e:
-            logger.error(f"pymbar UBAR failed: {e}")
-            raise
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
 
     @staticmethod
-    def rbar(
-        w_F: np.ndarray,
-        w_R: np.ndarray,
+    def compute_rbar(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
         temperature: float = 298.15,
         units: str = 'kJ',
         software: str = 'Gromacs',
@@ -865,191 +1079,55 @@ class BennettAcceptanceRatio:
         trial_range: tuple = (-10, 10),
     ) -> tuple[float, float]:
         """
-        Range-based Bennett Acceptance Ratio (RBAR) method.
-        Exactly adapted from alchemical_analysis.py RBAR implementation.
+        Compute total RBAR estimate across all lambda intervals.
 
         RBAR calculates UBAR for a series of 'trial' free energies and chooses
         the one that best satisfies the equations.
 
         Parameters:
         -----------
-        w_F : np.ndarray
-            Forward work values: w_F = u_kln[k,k+1,:] - u_kln[k,k,:]
-            These should already be in reduced units!
-        w_R : np.ndarray
-            Reverse work values: w_R = u_kln[k+1,k,:] - u_kln[k+1,k+1,:]
-            These should already be in reduced units!
-        temperature : float
-            Temperature in Kelvin (for unit conversion only)
-        units : str
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str
-            Software package name
-        verbose : bool
-            Enable verbose output
-        trial_range : tuple
+        Same as compute_bar plus:
+        trial_range : tuple, default (-10, 10)
             Range of trial free energy values to test (in reduced units)
 
-        Returns:
-        --------
-        Tuple[float, float] : (free_energy, error) in specified units
+        Returns same as compute_bar.
         """
-        try:
-            # Original implementation logic - test range of trial free energies
-            min_diff = 1e6
-            best_udf = 0
-            best_uddf = 0
+        _validate_potential_energies(potential_energies, sample_counts)
 
-            # Test trial free energies in the specified range
-            for trial_udf in range(trial_range[0], trial_range[1] + 1, 1):
-                try:
-                    # Calculate UBAR with this trial free energy as initial guess
-                    (udf, uddf) = pymbar.bar.BAR(
-                        w_F,
-                        w_R,
-                        verbose=verbose,
-                        iterated_solution=False,
-                        initial_f_k=np.array([0.0, float(trial_udf)]),  # Trial guess
-                    )
+        # Calculate work values for all intervals
+        w_F_all, w_R_all = _calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
 
-                    # Check how well this satisfies the BAR equation
-                    # (This is a simplified version - original has more complex logic)
-                    diff = abs(udf - trial_udf)
+        # Calculate free energy for each interval
+        total_dg = 0.0
+        total_error_variance = 0.0
 
-                    if diff < min_diff:
-                        min_diff = diff
-                        best_udf = udf
-                        best_uddf = uddf
-
-                except Exception:
-                    # Skip this trial value if it fails
-                    continue
-
-            if min_diff == 1e6:
-                # All trials failed, fall back to regular BAR
-                logger.warning("All RBAR trials failed, falling back to BAR")
-                return BennettAcceptanceRatio.bar(
-                    w_F, w_R, temperature, units, software
+        for lambda_state_i, (w_F, w_R) in enumerate(zip(w_F_all, w_R_all)):
+            if len(w_F) == 0 or len(w_R) == 0:
+                logger.warning(
+                    f"No work values for interval {lambda_state_i}→{lambda_state_i+1}"
                 )
+                continue
 
-            # Convert to physical units using beta_report
-            beta_report = calculate_beta_parameter(temperature, units, software)
-            df_physical = best_udf / beta_report
-            ddf_physical = best_uddf / beta_report
-
-            return df_physical, ddf_physical
-
-        except Exception as e:
-            logger.error(f"RBAR calculation failed: {e}, falling back to BAR")
-            return BennettAcceptanceRatio.bar(w_F, w_R, temperature, units, software)
-
-    @staticmethod
-    def calculate_work_values(
-        u_kln: np.ndarray, k: int
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Calculate forward and reverse work values as in original alchemical_analysis.py.
-
-        This is identical to the function in ExponentialAveraging class.
-
-        Parameters:
-        -----------
-        u_kln : np.ndarray, shape (K, K, max_N)
-            Reduced potential energy matrix
-        k : int
-            Current lambda state index
-
-        Returns:
-        --------
-        tuple[np.ndarray, np.ndarray] : (w_F, w_R)
-            Forward and reverse work values
-        """
-        if k >= u_kln.shape[0] - 1:
-            raise ValueError(
-                f"State index {k} too large for matrix with {u_kln.shape[0]} states"
+            dg_interval, ddg_interval = (
+                BennettAcceptanceRatio._calculate_interval_free_energy(
+                    w_F,
+                    w_R,
+                    'RBAR',
+                    temperature,
+                    units,
+                    software,
+                    verbose=verbose,
+                    trial_range=trial_range,
+                )
             )
 
-        # Find valid samples (assuming 0 means no data)
-        N_k = np.sum(u_kln[k, k, :] != 0)
-        N_k_plus_1 = np.sum(u_kln[k + 1, k + 1, :] != 0)
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
 
-        # Forward work: w_F = u_kln[k,k+1,0:N_k[k]] - u_kln[k,k,0:N_k[k]]
-        w_F = u_kln[k, k + 1, 0:N_k] - u_kln[k, k, 0:N_k]
-
-        # Reverse work: w_R = u_kln[k+1,k,0:N_k[k+1]] - u_kln[k+1,k+1,0:N_k[k+1]]
-        w_R = u_kln[k + 1, k, 0:N_k_plus_1] - u_kln[k + 1, k + 1, 0:N_k_plus_1]
-
-        return w_F, w_R
-
-    @staticmethod
-    def analyze_all_methods(
-        u_kln: np.ndarray,
-        k: int,
-        temperature: float = 298.15,
-        units: str = 'kJ',
-        software: str = 'Gromacs',
-        relative_tolerance: float = 1e-10,
-        verbose: bool = False,
-    ) -> dict:
-        """
-        Run all BAR-based methods (BAR, UBAR, RBAR) for a given state pair.
-
-        Parameters:
-        -----------
-        u_kln : np.ndarray, shape (K, K, max_N)
-            Reduced potential energy matrix
-        k : int
-            Current lambda state index
-        temperature : float
-            Temperature in Kelvin
-        units : str
-            Output units
-        software : str
-            Software package name
-        relative_tolerance : float
-            Convergence tolerance
-        verbose : bool
-            Enable verbose output
-
-        Returns:
-        --------
-        dict : Results from all methods
-            Keys: 'BAR', 'UBAR', 'RBAR'
-            Values: (free_energy, error) tuples
-        """
-        # Calculate work values
-        w_F, w_R = BennettAcceptanceRatio.calculate_work_values(u_kln, k)
-
-        results = {}
-
-        # BAR
-        try:
-            results['BAR'] = BennettAcceptanceRatio.bar(
-                w_F, w_R, temperature, units, software, relative_tolerance, verbose
-            )
-        except Exception as e:
-            logger.error(f"BAR failed for state {k}: {e}")
-            results['BAR'] = (float('inf'), float('inf'))
-
-        # UBAR
-        try:
-            results['UBAR'] = BennettAcceptanceRatio.ubar(
-                w_F, w_R, temperature, units, software, verbose
-            )
-        except Exception as e:
-            logger.error(f"UBAR failed for state {k}: {e}")
-            results['UBAR'] = (float('inf'), float('inf'))
-
-        # RBAR
-        try:
-            results['RBAR'] = BennettAcceptanceRatio.rbar(
-                w_F, w_R, temperature, units, software, verbose
-            )
-        except Exception as e:
-            logger.error(f"RBAR failed for state {k}: {e}")
-            results['RBAR'] = (float('inf'), float('inf'))
-
-        return results
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
 
 
 class MultistateBAR:

@@ -20,7 +20,11 @@ Expected results from results.txt (which is outputed by running alchemical_analy
 - TI-CUBIC: -4.926 ± 11.621 kcal/mol
 - DEXP: 5.590 ± 0.612 kcal/mol
 - IEXP: 15.218 ± 0.755 kcal/mol
+- GINS: 61245350.401 ± 61251232.076 kcal/mol
+- GDEL: -3.616 ± 13.852 kcal/mol
 - BAR: 7.774 ± nan kcal/mol
+- UBAR: 4.922 ± nan kcal/mol
+- RBAR: 7.661 ± nan kcal/mol
 - MBAR: 7.561 ± 5.762 kcal/mol
 """
 
@@ -72,7 +76,7 @@ def exp_data(lambda_data):
 
 
 @pytest.fixture
-def mbar_data(lambda_data):
+def bar_data(lambda_data):
     """
     Prepare reduced potentials u_klt and snapshot counts for MBAR/EXP/BAR tests.
     """
@@ -83,6 +87,7 @@ def mbar_data(lambda_data):
 def test_trapezoidal_integration(ti_data):
     """
     Test trapezoidal integration for TI.
+    The expected values trapezoidal integration: -3.064 ± 9.343 kcal/mol
     """
     lv, ave, std = ti_data
     dg_kcal, ddg_kcal = ThermodynamicIntegration.trapezoidal_integration(
@@ -96,6 +101,7 @@ def test_trapezoidal_integration(ti_data):
 def test_cubic_spline_integration(ti_data):
     """
     Test cubic spline integration for TI.
+    The expected values cubic spline integration: -4.926 ± 11.621 kcal/mol
     """
     lv, ave, std = ti_data
     dg_kcal, ddg_kcal = ThermodynamicIntegration.cubic_spline_integration(
@@ -168,32 +174,72 @@ def test_spline_insufficient_points():
 def test_exponential_average_dexp(exp_data):
     """
     Test DEXP calculation using ExponentialAveraging.
+
+    The expected values for DEXP: 5.590 ± 0.612 kcal/mol
     """
     u_klt, _ = exp_data
     dg_kcal, ddg_kcal = ExponentialAveraging.compute_dexp(
-        potential_energies=u_klt, temperature=300.0
+        potential_energies=u_klt, temperature=300.0, units="kcal"
     )
 
     assert pytest.approx(5.590, rel=0.001) == dg_kcal
     assert pytest.approx(0.612, rel=0.001) == ddg_kcal
 
 
-# # ─── Bennett Acceptance Ratio (BAR, UBAR, RBAR) ────────────────────────────────
+def test_exponential_average_iexp(exp_data):
+    """
+    Test DEXP calculation using ExponentialAveraging.
+    The expected values for IEXP: 15.218 ± 0.755 kcal/mol
+    """
+    u_klt, _ = exp_data
+    dg_kcal, ddg_kcal = ExponentialAveraging.compute_iexp(
+        potential_energies=u_klt, temperature=300.0, units="kcal"
+    )
+    assert pytest.approx(15.218, rel=0.001) == dg_kcal
+    assert pytest.approx(0.755, rel=0.001) == ddg_kcal
 
-# @pytest.mark.parametrize("method_name, method_func", [
-#     ("bar",   BennettAcceptanceRatio.bar),
-#     ("ubar",  BennettAcceptanceRatio.ubar),
-#     ("rbar",  BennettAcceptanceRatio.rbar),
-# ])
-# def test_bar_variants(mbar_data, method_name, method_func):
-#     u_klt, _ = mbar_data
-#     k = 0
-#     w_F, w_R = BennettAcceptanceRatio.calculate_work_values(u_klt, k)
-#     dg, ddg = method_func(w_F, w_R, temperature=300, units="kcal", software="Gromacs")
-#     assert isinstance(dg, float)
-#     # BAR’s error may legitimately be NaN
-#     if method_name != "bar":
-#         assert not np.isnan(ddg)
+
+# ─── Bennett Acceptance Ratio (BAR, UBAR, RBAR) ────────────────────────────────
+def test_bennett_acceptance_ratio_bar(bar_data):
+    """
+    Test BAR calculation using BennettAcceptanceRatio.
+    The expected values for BAR: 7.774 ± nan kcal/mol
+    """
+    u_klt, _ = bar_data
+    dg_kcal, ddg_kcal = BennettAcceptanceRatio.compute_bar(
+        potential_energies=u_klt, temperature=300.0, units="kcal"
+    )
+
+    assert pytest.approx(7.774, rel=0.001) == dg_kcal
+    assert np.isnan(ddg_kcal)  # BAR does not provide error estimate
+
+
+def test_bennett_acceptance_ratio_ubar(bar_data):
+    """
+    Test UBAR calculation using BennettAcceptanceRatio.
+    The expected values for UBAR: 4.922 ± nan kcal/mol
+    """
+    u_klt, _ = bar_data
+    dg_kcal, ddg_kcal = BennettAcceptanceRatio.compute_ubar(
+        potential_energies=u_klt, temperature=300.0, units="kcal"
+    )
+
+    assert pytest.approx(4.922, rel=0.001) == dg_kcal
+    assert np.isnan(ddg_kcal)  # UBAR does not provide error estimate
+
+
+def test_bennett_acceptance_ratio_rbar(bar_data):
+    """
+    Test RBAR calculation using BennettAcceptanceRatio.
+    The expected values for RBAR: 7.661 ± nan kcal/mol
+    """
+    u_klt, _ = bar_data
+    dg_kcal, ddg_kcal = BennettAcceptanceRatio.compute_rbar(
+        potential_energies=u_klt, temperature=300.0, units="kcal"
+    )
+
+    assert pytest.approx(7.661, rel=0.001) == dg_kcal
+    assert np.isnan(ddg_kcal)  # RBAR does not provide error estimate   
 
 
 # # ─── Multistate BAR (MBAR) ─────────────────────────────────────────────────────
