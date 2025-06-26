@@ -18,8 +18,16 @@ def pytest_configure():
             category=DeprecationWarning,
         )
 
+    # Silence pymbar "matrix subclass" deprecation warnings
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*matrix subclass is not the recommended way to represent matrices.*",
+        category=PendingDeprecationWarning,
+        module=r"pymbar\..*",
+    )
 
-@pytest.fixture(scope="session", autouse=True)
+
+@pytest.fixture(scope="module", autouse=True)
 def suppress_warnings():
     """Autouse fixture to suppress warnings at the session level."""
     with warnings.catch_warnings():
