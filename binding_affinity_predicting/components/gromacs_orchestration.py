@@ -734,6 +734,9 @@ class Calculation(SimulationRunner):
             If True, submit all windows` `submit_gmx.sh` to SLURM (nonblocking).
             If False, run everything locally (blocking).
         run_sync :
+            If True, run locally in blocking mode.
+            If False, run locally in non-blocking mode (asynchronously).
+            This is only relevant if `use_hpc` is False.
         """
         if not getattr(self, "setup_complete", False):
             raise ValueError("Calculation has not been set up yet. Call setup() first.")
