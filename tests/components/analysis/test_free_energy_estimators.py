@@ -40,7 +40,6 @@ from binding_affinity_predicting.components.analysis.free_energy_estimators impo
 )
 from binding_affinity_predicting.components.analysis.utils import (
     calculate_beta_parameter,
-    get_lambda_components_changing,
 )
 
 
@@ -65,112 +64,118 @@ def ti_data(lambda_data):
 
 
 @pytest.fixture
-def mbar_data(fep_data):
+def exp_data(lambda_data):
     """
     Prepare reduced potentials u_klt and snapshot counts for MBAR/EXP/BAR tests.
     """
-    return fep_data["u_klt"], fep_data["nsnapshots"]
+    return lambda_data["u_klt"], lambda_data["nsnapshots"]
+
+
+@pytest.fixture
+def mbar_data(lambda_data):
+    """
+    Prepare reduced potentials u_klt and snapshot counts for MBAR/EXP/BAR tests.
+    """
+    return lambda_data["u_klt"], lambda_data["nsnapshots"]
 
 
 # ─── Thermodynamic Integration ──────────────────────────────────────────────────
 def test_trapezoidal_integration(ti_data):
+    """
+    Test trapezoidal integration for TI.
+    """
     lv, ave, std = ti_data
-    dg, ddg = ThermodynamicIntegration.trapezoidal_integration(lv, ave, std)
-    beta_report = calculate_beta_parameter(
-        temperature=300.0, units='kcal', software='Gromacs'
+    dg_kcal, ddg_kcal = ThermodynamicIntegration.trapezoidal_integration(
+        lambda_vectors=lv, ave_dhdl=ave, std_dhdl=std, temperature=300.0, units='kcal'
     )
 
-    dg_kcal = dg / beta_report
-    ddg_kcal = ddg / beta_report
-
-    assert pytest.approx(-3.064, rel=0.05) == dg_kcal
-    assert pytest.approx(9.343, rel=0.05) == ddg_kcal
+    assert pytest.approx(-3.064, rel=0.001) == dg_kcal
+    assert pytest.approx(9.343, rel=0.001) == ddg_kcal
 
 
 def test_cubic_spline_integration(ti_data):
+    """
+    Test cubic spline integration for TI.
+    """
     lv, ave, std = ti_data
-    dg, ddg = ThermodynamicIntegration.cubic_spline_integration(lv, ave, std)
-    beta_report = calculate_beta_parameter(
-        temperature=300.0, units='kcal', software='Gromacs'
+    dg_kcal, ddg_kcal = ThermodynamicIntegration.cubic_spline_integration(
+        lambda_vectors=lv, ave_dhdl=ave, std_dhdl=std, temperature=300.0, units='kcal'
     )
-    dg_kcal = dg / beta_report
-    ddg_kcal = ddg / beta_report
 
-    assert pytest.approx(-4.926, rel=0.05) == dg_kcal
-    assert pytest.approx(11.621, rel=0.20) == ddg_kcal
+    assert pytest.approx(-4.926, rel=0.001) == dg_kcal
+    assert pytest.approx(11.621, rel=0.001) == ddg_kcal
 
 
-# @pytest.mark.parametrize(
-#     "lv, ave, std, err_msg",
-#     [
-#         # mismatched ave/std shape
-#         (np.array([[0.0,1.0],[0.5,1.0],[1.0,1.0]]),
-#          np.array([[1.0,2.0],[1.5,2.5]]),
-#          np.array([[0.1,0.2],[0.15,0.25],[0.2,0.3]]),
-#          "must have same shape"),
-#         # too few points
-#         (np.array([[0.0,1.0]]),
-#          np.array([[1.0,2.0]]),
-#          np.array([[0.1,0.2]]),
-#          "Need at least 2 lambda states")
-#     ]
-# )
-# def test_ti_input_validation(lv, ave, std, err_msg):
-#     with pytest.raises(ValueError, match=err_msg):
-#         ThermodynamicIntegration.trapezoidal_integration(lv, ave, std)
+@pytest.mark.parametrize(
+    "lv, ave, std, err_msg",
+    [
+        # mismatched ave/std shape
+        (
+            np.array([[0.0, 1.0], [0.5, 1.0], [1.0, 1.0]]),
+            np.array([[1.0, 2.0], [1.5, 2.5]]),
+            np.array([[0.1, 0.2], [0.15, 0.25], [0.2, 0.3]]),
+            "must have same shape",
+        ),
+        # too few points
+        (
+            np.array([[0.0, 1.0]]),
+            np.array([[1.0, 2.0]]),
+            np.array([[0.1, 0.2]]),
+            "Need at least 2 lambda states",
+        ),
+    ],
+)
+def test_ti_input_validation(lv, ave, std, err_msg):
+    """
+    Test input validation for TI methods.
+    """
+    with pytest.raises(ValueError, match=err_msg):
+        ThermodynamicIntegration.trapezoidal_integration(lv, ave, std)
 
 
-# # ─── Natural Cubic Spline ───────────────────────────────────────────────────────
-
-# def test_spline_creation_minimum_points():
-#     xs = np.array([0.0, 0.33, 0.67, 1.0])
-#     spline = NaturalCubicSpline(xs)
-#     assert spline.x.shape[0] == 4
-#     assert spline.wsum.shape[0] == 4
-
-# def test_spline_integration_polynomial():
-#     xs = np.linspace(0, 1, 5)
-#     ys = xs**2
-#     spline = NaturalCubicSpline(xs)
-#     val = spline.integrate(ys)
-#     # exact ∫0¹ x² dx = 1/3 ≈ 0.333
-#     assert 0.2 < val < 0.6
-
-# def test_spline_insufficient_points():
-#     xs = np.array([0.0, 0.5, 1.0])
-#     with pytest.raises(ValueError, match="at least 4 points"):
-#         NaturalCubicSpline(xs)
+# ─── Natural Cubic Spline ───────────────────────────────────────────────────────
+def test_spline_creation_minimum_points():
+    """
+    Test that NaturalCubicSpline can be created with minimum points.
+    """
+    xs = np.array([0.0, 0.33, 0.67, 1.0])
+    spline = NaturalCubicSpline(xs)
+    assert spline.x.shape[0] == 4
+    assert spline.wsum.shape[0] == 4
 
 
-# # ─── Exponential Averaging (EXP, DEXP, IEXP, GDEL, GINS) ────────────────────────
+def test_spline_integration_polynomial():
+    """
+    Test integration of a simple polynomial using NaturalCubicSpline.
+    """
+    xs = np.linspace(0, 1, 5)
+    ys = xs**2
+    spline = NaturalCubicSpline(xs)
+    val = spline.integrate(ys)
+    assert pytest.approx(val, rel=0.001) == 0.335
 
-# @pytest.mark.parametrize("method", [
-#     ("forward_exp",  ExponentialAveraging.forward_exp),
-#     ("reverse_exp",  ExponentialAveraging.reverse_exp),
-#     ("gauss_del",   ExponentialAveraging.gaussian_deletion),
-#     ("gauss_ins",   ExponentialAveraging.gaussian_insertion),
-# ])
-# def test_exponential_methods_non_nan(mbar_data, method):
-#     u_klt, _ = mbar_data
-#     k = 0
-#     w_F, w_R = ExponentialAveraging.calculate_work_values(u_klt, k)
-#     if method[0] == "forward_exp":
-#         dg, ddg = method[1](w_F, temperature=300, units="kcal", software="Gromacs")
-#     elif method[0] == "reverse_exp":
-#         dg, ddg = method[1](w_R, temperature=300, units="kcal", software="Gromacs")
-#     else:
-#         # both forward and reverse use same signature
-#         dg, ddg = method[1](w_F if "del" in method[0] else w_R,
-#                              temperature=300, units="kcal", software="Gromacs")
-#     assert not np.isnan(dg)
-#     assert not np.isnan(ddg)
-#     assert ddg >= 0
 
-# def test_work_value_calculation_errors():
-#     u_klt = np.random.rand(3,3,100)
-#     # invalid state
-#     with pytest.raises(ValueError, match="too large"):
-#         ExponentialAveraging.calculate_work_values(u_klt, 5)
+def test_spline_insufficient_points():
+    """
+    Test that NaturalCubicSpline raises ValueError for insufficient points.
+    """
+    xs = np.array([0.0])
+    with pytest.raises(ValueError, match="at least 2 points"):
+        NaturalCubicSpline(xs)
+
+
+# ─── Exponential Averaging (EXP, DEXP, IEXP, GDEL, GINS) ────────────────────────
+def test_exponential_average_dexp(exp_data):
+    """
+    Test DEXP calculation using ExponentialAveraging.
+    """
+    u_klt, _ = exp_data
+    dg_kcal, ddg_kcal = ExponentialAveraging.compute_dexp(
+        potential_energies=u_klt, temperature=300.0
+    )
+
+    assert pytest.approx(5.590, rel=0.001) == dg_kcal
+    assert pytest.approx(0.612, rel=0.001) == ddg_kcal
 
 
 # # ─── Bennett Acceptance Ratio (BAR, UBAR, RBAR) ────────────────────────────────
@@ -224,48 +229,3 @@ def test_cubic_spline_integration(ti_data):
 #     )
 #     assert results["n_states"] == len(nsnapshots)
 #     assert "total_dg" in results and "total_error" in results
-
-
-# # ─── Unified FreeEnergyEstimator Interface ────────────────────────────────────
-
-# @pytest.fixture
-# def estimator():
-#     return FreeEnergyEstimator(temperature=300.0, units="kcal", software="Gromacs")
-
-# def test_estimate_ti_interface(estimator, ti_data):
-#     lv, ave, std = ti_data
-#     out = estimator.estimate_ti(lv, ave, std, method="trapezoidal")
-#     assert out["success"]
-#     assert out["method"] == "TI_trapezoidal"
-#     out = estimator.estimate_ti(lv, ave, std, method="cubic")
-#     assert out["success"]
-#     assert out["method"] == "TI_cubic"
-
-# @pytest.mark.parametrize("exp_method", ["DEXP", "IEXP", "GDEL", "GINS"])
-# def test_estimate_exp_interface(estimator, mbar_data, exp_method):
-#     u_klt, _ = mbar_data
-#     k = 0
-#     out = estimator.estimate_exp(u_klt, k, method=exp_method)
-#     assert out["success"]
-#     assert out["method"] == exp_method
-
-# @pytest.mark.parametrize("bar_method", ["BAR", "UBAR", "RBAR"])
-# def test_estimate_bar_interface(estimator, mbar_data, bar_method):
-#     u_klt, _ = mbar_data
-#     k = 0
-#     out = estimator.estimate_bar(u_klt, k, method=bar_method)
-#     assert out["success"]
-#     assert out["method"] == bar_method
-
-# def test_estimate_mbar_interface(estimator, mbar_data):
-#     u_klt, nsnapshots = mbar_data
-#     out = estimator.estimate_mbar(u_klt, nsnapshots)
-#     assert out["success"]
-#     assert out["method"] == "MBAR"
-#     assert "total_dg" in out and "total_error" in out
-
-# def test_invalid_ti_method(estimator, ti_data):
-#     lv, ave, std = ti_data
-#     out = estimator.estimate_ti(lv, ave, std, method="INVALID")
-#     assert out["success"] is False
-#     assert "error_message" in out

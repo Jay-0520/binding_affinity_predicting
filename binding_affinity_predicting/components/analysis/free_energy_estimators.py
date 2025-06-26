@@ -7,10 +7,13 @@ Bennett Acceptance Ratio (BAR), MBAR, and exponential averaging methods.
 
 methods are adopted from this script:
 https://github.com/MobleyLab/alchemical-analysis/blob/master/alchemical_analysis/alchemical_analysis.py
+
+note that we must extract independent/uncorrelated samples for these methods to work properly.
 """
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pymbar
@@ -173,7 +176,7 @@ class ThermodynamicIntegration:
     Deriving total free energy differences by integrating dH/dλ over three components in GROMACS
     FEP simulations.
 
-    Very important NOTE: This class does not handle unit conversion directly.
+    Note that class does handle unit conversion directly.
     """
 
     @staticmethod
@@ -193,7 +196,12 @@ class ThermodynamicIntegration:
 
     @staticmethod
     def trapezoidal_integration(
-        lambda_vectors: np.ndarray, ave_dhdl: np.ndarray, std_dhdl: np.ndarray
+        lambda_vectors: np.ndarray,
+        ave_dhdl: np.ndarray,
+        std_dhdl: np.ndarray,
+        temperature: float = 298.15,
+        units: str = 'kcal',
+        software: str = 'Gromacs',
     ) -> tuple[float, float]:
         """
         Trapezoidal integration with error propagation for total free energy across all components.
@@ -212,11 +220,17 @@ class ThermodynamicIntegration:
             Mean dH/dλ values at each lambda state (already multiplied by beta in original)
         std_dhdl : np.ndarray, shape (num_lambda_states, num_components)
             Standard error estimates for dH/dλ at each lambda state (already multiplied by beta)
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kcal'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name
 
         Returns:
         --------
         Tuple[float, float] : (integrated_total_free_energy_difference, propagated_total_error)
-            Both in reduced units (already includes beta factor)
+            Both in specified physical units
         """
         ThermodynamicIntegration._validate_inputs(lambda_vectors, ave_dhdl, std_dhdl)
 
@@ -226,7 +240,7 @@ class ThermodynamicIntegration:
         # Trapezoidal rule: ½ * dλ * (f(λₖ) + f(λₖ₊₁))
         df_contributions = 0.5 * np.sum(dlam * (ave_dhdl[:-1] + ave_dhdl[1:]), axis=1)
         # Sum over all lambda intervals
-        total_df = np.sum(df_contributions)
+        total_df_reduced = np.sum(df_contributions)
 
         # Error calculation: match totalEnergies() in alchemical_analysis.py
         total_error_variance = 0.0
@@ -249,13 +263,23 @@ class ThermodynamicIntegration:
                     std_j = std_dhdl[lj, j]
                     total_error_variance += np.dot(wsum**2, std_j**2)
 
-        total_error = np.sqrt(total_error_variance)
+        total_error_reduced = np.sqrt(total_error_variance)
 
-        return float(total_df), float(total_error)
+        # Convert from reduced units to physical units
+        beta_report = calculate_beta_parameter(temperature, units, software)
+        total_df_physical = total_df_reduced / beta_report
+        total_error_physical = total_error_reduced / beta_report
+
+        return float(total_df_physical), float(total_error_physical)
 
     @staticmethod
     def cubic_spline_integration(
-        lambda_vectors: np.ndarray, ave_dhdl: np.ndarray, std_dhdl: np.ndarray
+        lambda_vectors: np.ndarray,
+        ave_dhdl: np.ndarray,
+        std_dhdl: np.ndarray,
+        temperature: float = 298.15,
+        units: str = 'kcal',
+        software: str = 'Gromacs',
     ) -> tuple[float, float]:
         """
         Cubic spline integration for total free energy across all components.
@@ -273,11 +297,17 @@ class ThermodynamicIntegration:
             Mean dH/dλ values (already multiplied by beta in original)
         std_dhdl : np.ndarray, shape (num_lambda_states, num_components)
             Standard error estimates (already multiplied by beta in original)
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kcal'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name
 
         Returns:
         --------
         Tuple[float, float] : (integrated_total_free_energy_difference, propagated_total_error)
-            Both in reduced units (already includes beta factor)
+            Both in specified physical units
         """
         num_lambda_states, num_components = lambda_vectors.shape
 
@@ -289,7 +319,7 @@ class ThermodynamicIntegration:
 
         components_changing = get_lambda_components_changing(lambda_vectors)
 
-        total_df = 0.0
+        total_df_reduced = 0.0
         total_error_variance = 0.0
         for j in range(num_components):
             lj = components_changing[:, j]
@@ -309,523 +339,158 @@ class ThermodynamicIntegration:
                 df_j = np.dot(spline.wsum, ave_j)
                 ddf_j_sq = np.dot(spline.wsum**2, std_j**2)
 
-                total_df += df_j
+                total_df_reduced += df_j
                 total_error_variance += ddf_j_sq
 
             except Exception as e:
                 logger.warning(f"Spline creation failed for component {j}: {e}")
                 continue
 
-        return float(total_df), float(np.sqrt(total_error_variance))
+        total_error_reduced = np.sqrt(total_error_variance)
+
+        # Convert from reduced units to physical units
+        beta_report = calculate_beta_parameter(temperature, units, software)
+        total_df_physical = total_df_reduced / beta_report
+        total_error_physical = total_error_reduced / beta_report
+
+        return float(total_df_physical), float(total_error_physical)
 
 
-class MultistateBAR:
-    """
-    Multistate Bennett Acceptance Ratio implementation.
-
-    Faithfully adapted from alchemical_analysis.py MBAR functionality.
-    """
-
-    @staticmethod
-    def _estimatewithMBAR_core(
-        uncorr_potential_energies: np.ndarray,
-        num_uncorr_samples_per_state: np.ndarray,
-        beta_report: float,
-        relative_tolerance: float = 1e-10,
-        regular_estimate: bool = False,
-        verbose: bool = False,
-        initialize: str = 'BAR',
-    ) -> tuple:
-        """
-        Core MBAR estimation function - direct adaptation from alchemical_analysis.py.
-
-        This implements the exact `estimatewithMBAR` logic from the original code
-        but uses modern parameter naming.
-
-        Parameters:
-        -----------
-        uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
-            Reduced potential energy matrix where [k,l,n] is the reduced potential
-            of snapshot n from state k evaluated at state l
-        num_uncorr_samples_per_state : np.ndarray, shape (K,)
-            Number of samples from each state k
-        relative_tolerance : float, default 1e-10
-            Relative tolerance for MBAR convergence
-        regular_estimate : bool, default False
-            If True, return full matrices; if False, return only endpoint difference
-        verbose : bool, default False
-            Enable verbose pymbar output
-        initialize : str, default 'BAR'
-            MBAR initialization method ('BAR' or 'zeros')
-        beta_report : float, optional
-            Unit conversion factor from original alchemical_analysis.py
-
-        Returns:
-        --------
-        If regular_estimate=True: (Deltaf_ij, dDeltaf_ij, mbar_object)
-            Full free energy difference matrices and MBAR object
-        If regular_estimate=False: (total_dg, total_error)
-            Single endpoint free energy difference and error
-        """
-        try:
-            # Initialize MBAR exactly as in original (using original parameter names internally)
-            MBAR = pymbar.mbar.MBAR(
-                uncorr_potential_energies,
-                num_uncorr_samples_per_state,
-                verbose=verbose,
-                relative_tolerance=relative_tolerance,
-                initialize=initialize,
-            )
-
-            # Get free energy differences exactly as in original
-            # note that theta_ij (marked as "_") is never used in the original code - by JJH-2025-06-24  # noqa: E501
-            (Deltaf_ij, dDeltaf_ij, _) = MBAR.getFreeEnergyDifferences(
-                uncertainty_method='svd-ew', return_theta=True
-            )
-
-            if verbose:
-                logger.info(
-                    f"Matrix of free energy differences\nDeltaf_ij:\n{Deltaf_ij}\ndDeltaf_ij:\n{dDeltaf_ij}"  # noqa: E501
-                )
-
-            # Return format matches original exactly
-            if regular_estimate:
-                return (Deltaf_ij, dDeltaf_ij, MBAR)
-            else:
-                K = len(num_uncorr_samples_per_state)
-                return (
-                    Deltaf_ij[0, K - 1] / beta_report,
-                    dDeltaf_ij[0, K - 1] / beta_report,
-                    MBAR,
-                )
-
-        except Exception as e:
-            logger.error(f"MBAR calculation failed: {e}")
-            raise
-
-    @staticmethod
-    def compute_mbar(
-        uncorr_potential_energies: np.ndarray,
-        num_uncorr_samples_per_state: np.ndarray,
-        temperature: float = 298.15,
-        units: str = 'kJ',
-        software: str = 'Gromacs',
-        regular_estimate: bool = True,
-        **kwargs,
-    ) -> dict:
-        """
-        Compute MBAR estimates for all states.
-        Adapted from alchemical_analysis.py estimatewithMBAR function.
-
-        Parameters:
-        -----------
-        uncorr_potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
-        max_num_snapshots)
-            Reduced potential energy matrix where:
-            - First index (k): lambda state where snapshots were generated
-            - Second index (l): lambda state where energy is evaluated
-            - Third index (n): snapshot/time index
-            Example: uncorr_potential_energies[1, 3, :] = energies of λ₁ snapshots evaluated at λ₃
-        num_uncorr_samples_per_state : np.ndarray, shape (num_lambda_states,)
-            Number of samples from each lambda state
-        temperature : float, default 298.15
-            Temperature in Kelvin
-        units : str, default 'kJ'
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str, default 'Gromacs'
-            Software package name (affects unit handling)
-        **kwargs : dict
-            Additional MBAR parameters (relative_tolerance, verbose, initialize)
-
-        Returns:
-        --------
-        Dict : MBAR results including free energies and errors
-            All energies converted according to specified units
-            - 'total_dg': Total free energy change (kJ/mol)
-            - 'total_error': Total error estimate (kJ/mol)
-            - 'free_energies': Free energies relative to first state (kJ/mol)
-            - 'free_energy_errors': Error estimates for each state (kJ/mol)
-            - 'Deltaf_ij': Pairwise free energy differences matrix (kJ/mol)
-            - 'dDeltaf_ij': Error matrix for pairwise differences (kJ/mol)
-            - 'theta_ij': Theta matrix from MBAR
-            - 'mbar_object': The pymbar MBAR object
-            - 'n_states': Number of lambda states
-        """
-        # Extract parameters with original defaults
-        relative_tolerance = kwargs.get('relative_tolerance', 1e-10)
-        verbose = kwargs.get('verbose', False)
-        initialize = kwargs.get('initialize', 'BAR')
-        compute_overlap = kwargs.get('compute_overlap', False)
-
-        # Calculate beta parameters exactly as in original
-        beta_report = calculate_beta_parameter(
-            temperature=temperature, units=units, software=software
-        )
-
-        try:
-            if regular_estimate:
-                Deltaf_ij, dDeltaf_ij, mbar_object = (
-                    MultistateBAR._estimatewithMBAR_core(
-                        uncorr_potential_energies=uncorr_potential_energies,
-                        num_uncorr_samples_per_state=num_uncorr_samples_per_state,
-                        relative_tolerance=relative_tolerance,
-                        regular_estimate=regular_estimate,
-                        verbose=verbose,
-                        initialize=initialize,
-                        beta_report=beta_report,
-                    )
-                )
-
-                # Convert to physical units using proper beta_report
-                free_energies = Deltaf_ij[0, :] / beta_report
-                free_energy_errors = dDeltaf_ij[0, :] / beta_report
-
-                # Total free energy change (first to last state)
-                total_dg = free_energies[-1] - free_energies[0]
-                total_error = np.sqrt(
-                    free_energy_errors[0] ** 2 + free_energy_errors[-1] ** 2
-                )
-
-                # Determine unit string for output
-                unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
-                    units.lower()
-                ]
-
-                result = {
-                    'total_dg': total_dg,
-                    'total_error': total_error,
-                    'free_energies': free_energies,
-                    'free_energy_errors': free_energy_errors,
-                    'Deltaf_ij': Deltaf_ij / beta_report,
-                    'dDeltaf_ij': dDeltaf_ij / beta_report,
-                    'mbar_object': mbar_object,
-                    'n_states': len(num_uncorr_samples_per_state),
-                    'units': unit_string,
-                    'beta_report': beta_report,
-                    'temperature': temperature,
-                }
-
-                # Compute overlap matrix if requested (matches original)
-                if compute_overlap:
-                    overlap_matrix = mbar_object.computeOverlap()[
-                        2
-                    ]  # Exact original syntax
-                    result['overlap_matrix'] = overlap_matrix
-
-                return result
-
-            else:
-                # Simple case - returns already converted values
-                total_dg, total_error = MultistateBAR._estimatewithMBAR_core(
-                    uncorr_potential_energies=uncorr_potential_energies,
-                    num_uncorr_samples_per_state=num_uncorr_samples_per_state,
-                    relative_tolerance=relative_tolerance,
-                    regular_estimate=regular_estimate,
-                    verbose=verbose,
-                    initialize=initialize,
-                    beta_report=beta_report,
-                )
-
-                # Determine unit string for output
-                unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
-                    units.lower()
-                ]
-
-                return {
-                    'total_dg': total_dg,
-                    'total_error': total_error,
-                    'units': unit_string,
-                    'beta_report': beta_report,
-                    'temperature': temperature,
-                    'n_states': len(num_uncorr_samples_per_state),
-                }
-
-        except Exception as e:
-            logger.error(f"MBAR calculation failed: {e}")
-            raise
-
-    @staticmethod
-    def plot_overlap_matrix(overlap_matrix: np.ndarray, output_path: Path):
-        """
-        Plot overlap matrix adapted from alchemical_analysis.py plotOverlapMatrix.
-
-        Parameters:
-        -----------
-        overlap_matrix : np.ndarray, shape (num_lambda_states, num_lambda_states)
-            MBAR overlap matrix showing phase space overlap between lambda states
-        output_path : Path
-            Output file path for plot
-        """
-        try:
-            import matplotlib.pyplot as plt
-
-            num_lambda_states = overlap_matrix.shape[0]
-            max_prob = overlap_matrix.max()
-
-            fig, ax = plt.subplots(
-                figsize=(num_lambda_states / 2.0, num_lambda_states / 2.0)
-            )
-
-            im = ax.imshow(overlap_matrix, cmap='Blues', vmin=0, vmax=max_prob)
-
-            for i in range(num_lambda_states):
-                for j in range(num_lambda_states):
-                    prob = overlap_matrix[i, j]
-                    if prob < 0.005:
-                        text = ''
-                    elif prob > 0.995:
-                        text = '1.00'
-                    else:
-                        text = f"{prob:.2f}"[1:]  # Remove leading 0 (original behavior)
-
-                    color = 'white' if prob > max_prob / 2 else 'black'
-                    ax.text(
-                        j, i, text, ha='center', va='center', color=color, fontsize=8
-                    )
-
-            ax.set_xlabel('Lambda State')
-            ax.set_ylabel('Lambda State')
-            ax.set_title('MBAR Overlap Matrix')
-
-            plt.colorbar(im, ax=ax, label='Overlap Probability')
-
-            plt.tight_layout()
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            plt.close()
-
-            logger.info(f"Overlap matrix plot saved to {output_path}")
-
-        except ImportError:
-            logger.warning("matplotlib not available for overlap matrix plotting")
-        except Exception as e:
-            logger.error(f"Failed to plot overlap matrix: {e}")
-
-    @staticmethod
-    def print_overlap_summary(overlap_matrix: np.ndarray):
-        """
-        Print overlap matrix summary as in original alchemical_analysis.py.
-
-        Parameters:
-        -----------
-        overlap_matrix : np.ndarray, shape (num_lambda_states, num_lambda_states)
-            MBAR overlap matrix
-        """
-        num_lambda_states = overlap_matrix.shape[0]
-        logger.info("The overlap matrix is...")
-        for k in range(num_lambda_states):
-            line = ''
-            for ll in range(num_lambda_states):
-                line += ' %5.2f ' % overlap_matrix[k, ll]
-            logger.info(line)
-
-
-# TODO: need to double check this implementation
 class ExponentialAveraging:
     """
     Exponential averaging methods adapted from alchemical_analysis.py.
+
+    Refactored to process full potential energy matrices and return total
+    free energy changes across all lambda intervals.
+
     Implements DEXP, IEXP, GDEL, and GINS methods exactly as in original.
+
+    Note that class does handle unit conversion directly.
     """
 
     @staticmethod
-    def forward_exp(
-        w_F: np.ndarray,
-        temperature: float = 298.15,
-        units: str = 'kJ',
-        software: str = 'Gromacs',
-    ) -> tuple[float, float]:
+    def _validate_potential_energies(
+        potential_energies: np.ndarray, sample_counts: Optional[np.ndarray] = None
+    ) -> None:
         """
-        Forward exponential averaging (DEXP - deletion).
-        Exactly adapted from alchemical_analysis.py DEXP implementation.
+        Validate potential energy matrix and sample counts.
 
         Parameters:
         -----------
-        w_F : np.ndarray
-            Forward work values: w_F = u_kln[k,k+1,:] - u_kln[k,k,:]
-            These should already be in reduced units!
-        temperature : float
-            Temperature in Kelvin (for unit conversion only)
-        units : str
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str
-            Software package name
-
-        Returns:
-        --------
-        Tuple[float, float] : (free_energy, error) in specified units
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+            Reduced potential energy matrix
+        sample_counts : np.ndarray, shape (num_lambda_states,), optional
+            Number of samples per state
+            The potential_energies array is pre-allocated to accommodate the maximum number of snapshots
+            across all states, but not every state necessarily has that many samples. we might need to keep
+            track of how many samples we actually have for each state.
         """
-        try:
-            # Original implementation - w_F is already in reduced units
-            (df_reduced, ddf_reduced) = pymbar.exp.EXP(w_F)
-
-            # Convert to physical units using beta_report
-            beta_report = calculate_beta_parameter(temperature, units, software)
-
-            # Unit conversion exactly as in original: df/P.beta_report
-            df_physical = df_reduced / beta_report
-            ddf_physical = ddf_reduced / beta_report
-
-            return df_physical, ddf_physical
-
-        except Exception as e:
-            logger.warning(
-                f"pymbar EXP failed: {e}, falling back to simple exponential averaging"
-            )
-            return ExponentialAveraging._simple_exp(w_F, temperature, units, software)
-
-    @staticmethod
-    def reverse_exp(
-        w_R: np.ndarray,
-        temperature: float = 298.15,
-        units: str = 'kJ',
-        software: str = 'Gromacs',
-    ) -> tuple[float, float]:
-        """
-        Reverse exponential averaging (IEXP - insertion).
-        Exactly adapted from alchemical_analysis.py IEXP implementation.
-
-        Parameters:
-        -----------
-        w_R : np.ndarray
-            Reverse work values: w_R = u_kln[k+1,k,:] - u_kln[k+1,k+1,:]
-            These should already be in reduced units!
-        temperature : float
-            Temperature in Kelvin (for unit conversion only)
-        units : str
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str
-            Software package name
-
-        Returns:
-        --------
-        Tuple[float, float] : (free_energy, error) in specified units
-        """
-        try:
-            # Original implementation - w_R is already in reduced units
-            (rdf_reduced, rddf_reduced) = pymbar.exp.EXP(w_R)
-
-            # Original: (df['IEXP'], ddf['IEXP']) = (-rdf, rddf)
-            df_reduced = -rdf_reduced
-            ddf_reduced = rddf_reduced  # Error doesn't change sign
-
-            # Convert to physical units
-            beta_report = calculate_beta_parameter(temperature, units, software)
-            df_physical = df_reduced / beta_report
-            ddf_physical = ddf_reduced / beta_report
-
-            return df_physical, ddf_physical
-
-        except Exception as e:
-            logger.warning(
-                f"pymbar EXP failed: {e}, falling back to simple exponential averaging"
-            )
-            # For fallback, negate the work values
-            return ExponentialAveraging._simple_exp(
-                -w_R, temperature, units, software, negate_result=True
+        if potential_energies.ndim != 3:
+            raise ValueError(
+                "potential_energies must be 3D array (num_lambda_states, num_lambda_states, max_total_snapshots)"
             )
 
+        num_lambda_states = potential_energies.shape[0]
+        if potential_energies.shape[1] != num_lambda_states:
+            raise ValueError(
+                "potential_energies must be square in first two dimensions"
+            )
+
+        if num_lambda_states < 2:
+            raise ValueError("Need at least 2 lambda states")
+
+        if sample_counts is not None:
+            if len(sample_counts) != num_lambda_states:
+                raise ValueError(
+                    "sample_counts must have same length as number of states"
+                )
+            if np.any(sample_counts < 0):
+                raise ValueError("sample_counts must be non-negative")
+
     @staticmethod
-    def gaussian_deletion(
-        w_F: np.ndarray,
-        temperature: float = 298.15,
-        units: str = 'kJ',
-        software: str = 'Gromacs',
-    ) -> tuple[float, float]:
+    def _calculate_work_values_all_intervals(
+        potential_energies: np.ndarray, sample_counts: Optional[np.ndarray] = None
+    ) -> tuple[list, list]:
         """
-        Gaussian deletion (GDEL).
-        Exactly adapted from alchemical_analysis.py GDEL implementation.
+        Calculate forward and reverse work values for all lambda intervals.
 
         Parameters:
         -----------
-        w_F : np.ndarray
-            Forward work values: w_F = u_kln[k,k+1,:] - u_kln[k,k,:]
-            These should already be in reduced units!
-        temperature : float
-            Temperature in Kelvin (for unit conversion only)
-        units : str
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str
-            Software package name
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+            Reduced potential energy matrix
+        sample_counts : np.ndarray, shape (num_lambda_states,), optional
+            Number of samples per state. If None, inferred from non-zero entries.
 
         Returns:
         --------
-        Tuple[float, float] : (free_energy, error) in specified units
+        Tuple[list, list] : (w_F_all, w_R_all)
+            Lists of work values for each interval lambda_state_i → lambda_state_i+1
         """
-        try:
-            # Original implementation - w_F is already in reduced units
-            (df_reduced, ddf_reduced) = pymbar.exp.EXPGauss(w_F)
+        num_lambda_states = potential_energies.shape[0]
+        w_F_all = []
+        w_R_all = []
 
-            # Convert to physical units
-            beta_report = calculate_beta_parameter(temperature, units, software)
-            df_physical = df_reduced / beta_report
-            ddf_physical = ddf_reduced / beta_report
+        for lambda_state_i in range(num_lambda_states - 1):
+            lambda_state_j = lambda_state_i + 1
 
-            return df_physical, ddf_physical
+            # Determine number of samples for each state
+            if sample_counts is not None:
+                n_samples_i = sample_counts[lambda_state_i]
+                n_samples_j = sample_counts[lambda_state_j]
+            else:
+                # Infer from non-zero entries (assuming 0 means no data)
+                # TODO: contains the energies of samples from state i evaluated at their own state i
+                # assume that these should never legitimately be zero in real simulations
+                n_samples_i = np.sum(
+                    potential_energies[lambda_state_i, lambda_state_i, :] != 0
+                )
+                n_samples_j = np.sum(
+                    potential_energies[lambda_state_j, lambda_state_j, :] != 0
+                )
 
-        except Exception as e:
-            logger.warning(f"pymbar EXPGauss failed: {e}, falling back to forward EXP")
-            return ExponentialAveraging.forward_exp(w_F, temperature, units, software)
+            if n_samples_i == 0 or n_samples_j == 0:
+                logger.warning(
+                    f"No samples found for interval {lambda_state_i}→{lambda_state_j}, skipping"
+                )
+                w_F_all.append(np.array([]))
+                w_R_all.append(np.array([]))
+                continue
+
+            # Forward work: u_kln[i,j,0:n_i] - u_kln[i,i,0:n_i]
+            w_F = (
+                potential_energies[lambda_state_i, lambda_state_j, 0:n_samples_i]
+                - potential_energies[lambda_state_i, lambda_state_i, 0:n_samples_i]
+            )
+
+            # Reverse work: u_kln[j,i,0:n_j] - u_kln[j,j,0:n_j]
+            w_R = (
+                potential_energies[lambda_state_j, lambda_state_i, 0:n_samples_j]
+                - potential_energies[lambda_state_j, lambda_state_j, 0:n_samples_j]
+            )
+
+            w_F_all.append(w_F)
+            w_R_all.append(w_R)
+
+        return w_F_all, w_R_all
 
     @staticmethod
-    def gaussian_insertion(
-        w_R: np.ndarray,
-        temperature: float = 298.15,
-        units: str = 'kJ',
-        software: str = 'Gromacs',
-    ) -> tuple[float, float]:
-        """
-        Gaussian insertion (GINS).
-        Exactly adapted from alchemical_analysis.py GINS implementation.
-
-        Parameters:
-        -----------
-        w_R : np.ndarray
-            Reverse work values: w_R = u_kln[k+1,k,:] - u_kln[k+1,k+1,:]
-            These should already be in reduced units!
-        temperature : float
-            Temperature in Kelvin (for unit conversion only)
-        units : str
-            Output units: 'kJ', 'kcal', or 'kBT'
-        software : str
-            Software package name
-
-        Returns:
-        --------
-        Tuple[float, float] : (free_energy, error) in specified units
-        """
-        try:
-            # Original implementation - w_R is already in reduced units
-            (rdf_reduced, rddf_reduced) = pymbar.exp.EXPGauss(w_R)
-
-            # Original: (df['GINS'], ddf['GINS']) = (-rdf, rddf)
-            df_reduced = -rdf_reduced
-            ddf_reduced = rddf_reduced  # Error doesn't change sign
-
-            # Convert to physical units
-            beta_report = calculate_beta_parameter(temperature, units, software)
-            df_physical = df_reduced / beta_report
-            ddf_physical = ddf_reduced / beta_report
-
-            return df_physical, ddf_physical
-
-        except Exception as e:
-            logger.warning(f"pymbar EXPGauss failed: {e}, falling back to reverse EXP")
-            return ExponentialAveraging.reverse_exp(w_R, temperature, units, software)
-
-    @staticmethod
-    def _simple_exp(
+    def _calculate_interval_free_energy(
         work_values: np.ndarray,
-        temperature: float,
-        units: str = 'kJ',
+        method: str,
+        temperature: float = 298.15,
+        units: str = 'kcal',
         software: str = 'Gromacs',
         negate_result: bool = False,
     ) -> tuple[float, float]:
         """
-        Simple exponential averaging fallback.
+        Calculate free energy for a single interval using specified method.
 
         Parameters:
         -----------
         work_values : np.ndarray
-            Work values (should already be in reduced units)
+            Work values for this interval (already in reduced units)
+        method : str
+            Method name: 'DEXP', 'IEXP', 'GDEL', 'GINS'
         temperature : float
             Temperature in Kelvin
         units : str
@@ -833,80 +498,243 @@ class ExponentialAveraging:
         software : str
             Software package name
         negate_result : bool
-            Whether to negate the final result (for IEXP fallback)
+            Whether to negate the result (for reverse methods)
 
         Returns:
         --------
-        Tuple[float, float] : (free_energy, error)
+        Tuple[float, float] : (free_energy, error) in specified physical units
         """
-        # work_values should already be in reduced units, so use directly
-        exp_work = np.exp(-work_values)
+        if len(work_values) == 0:
+            return 0.0, 0.0
 
-        # Handle numerical issues
-        if np.any(np.isnan(exp_work)) or np.any(np.isinf(exp_work)):
-            logger.warning("Numerical issues in exponential averaging")
-            exp_work = exp_work[np.isfinite(exp_work)]
-
-        if len(exp_work) == 0:
-            return float('inf'), float('inf')
-
-        mean_exp = np.mean(exp_work)
-        if mean_exp <= 0:
-            return float('inf'), float('inf')
-
-        # Free energy in reduced units
-        dg_reduced = -np.log(mean_exp)
-
-        # Error estimate in reduced units
-        var_exp = np.var(exp_work)
-        dg_error_reduced = np.sqrt(var_exp) / (mean_exp * np.sqrt(len(exp_work)))
-
-        # Convert to physical units
+        # Calculate beta_report for unit conversion
         beta_report = calculate_beta_parameter(temperature, units, software)
-        dg_physical = dg_reduced / beta_report
-        dg_error_physical = dg_error_reduced / beta_report
 
-        if negate_result:
-            dg_physical = -dg_physical
+        try:
+            if method in ['DEXP', 'IEXP']:
+                # Use standard exponential averaging
+                import pymbar.exp
 
-        return dg_physical, dg_error_physical
+                df_reduced, ddf_reduced = pymbar.exp.EXP(work_values)
+
+            elif method in ['GDEL', 'GINS']:
+                # Use Gaussian exponential averaging
+                import pymbar.exp
+
+                df_reduced, ddf_reduced = pymbar.exp.EXPGauss(work_values)
+
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            # Apply negation for reverse methods
+            if negate_result:
+                df_reduced = -df_reduced
+
+            # Convert to physical units
+            df_physical = df_reduced / beta_report
+            ddf_physical = ddf_reduced / beta_report
+
+            return df_physical, ddf_physical
+
+        except Exception as e:
+            logger.warning(
+                f"pymbar {method} failed: {e}, using simple exponential averaging"
+            )
+            raise ValueError(f"pymbar {method} failed with error: {e}")
 
     @staticmethod
-    def calculate_work_values(
-        u_kln: np.ndarray, k: int
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def compute_dexp(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
+        temperature: float = 298.15,
+        units: str = 'kcal',
+        software: str = 'Gromacs',
+    ) -> tuple[float, float]:
         """
-        Calculate forward and reverse work values as in original alchemical_analysis.py.
+        Compute total DEXP (forward exponential averaging) across all lambda intervals.
 
         Parameters:
         -----------
-        u_kln : np.ndarray, shape (K, K, max_N)
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
             Reduced potential energy matrix
-            same as uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
-        k : int
-            Current lambda state index
+        sample_counts : np.ndarray, shape (num_lambda_states,), optional
+            Number of samples per state
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kcal'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name
 
         Returns:
         --------
-        tuple[np.ndarray, np.ndarray] : (w_F, w_R)
-            Forward and reverse work values
+        Tuple[float, float] : (total_free_energy, total_error) in specified units
         """
-        if k >= u_kln.shape[0] - 1:
-            raise ValueError(
-                f"State index {k} too large for matrix with {u_kln.shape[0]} states"
+        ExponentialAveraging._validate_potential_energies(
+            potential_energies, sample_counts
+        )
+
+        # Calculate work values for all intervals
+        w_F_all, _ = ExponentialAveraging._calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
+
+        # Calculate free energy for each interval
+        total_dg = 0.0
+        total_error_variance = 0.0
+
+        for lambda_state_i, w_F in enumerate(w_F_all):
+            if len(w_F) == 0:
+                continue
+
+            dg_interval, ddg_interval = (
+                ExponentialAveraging._calculate_interval_free_energy(
+                    w_F, 'DEXP', temperature, units, software, negate_result=False
+                )
             )
 
-        # Find valid samples
-        N_k = np.sum(u_kln[k, k, :] != 0)  # Assuming 0 means no data
-        N_k_plus_1 = np.sum(u_kln[k + 1, k + 1, :] != 0)
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
 
-        # Forward work: w_F = u_kln[k,k+1,0:N_k[k]] - u_kln[k,k,0:N_k[k]]
-        w_F = u_kln[k, k + 1, 0:N_k] - u_kln[k, k, 0:N_k]
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
 
-        # Reverse work: w_R = u_kln[k+1,k,0:N_k[k+1]] - u_kln[k+1,k+1,0:N_k[k+1]]
-        w_R = u_kln[k + 1, k, 0:N_k_plus_1] - u_kln[k + 1, k + 1, 0:N_k_plus_1]
+    @staticmethod
+    def compute_iexp(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
+        temperature: float = 298.15,
+        units: str = 'kcal',
+        software: str = 'Gromacs',
+    ) -> tuple[float, float]:
+        """
+        Compute total IEXP (reverse exponential averaging) across all lambda intervals.
 
-        return w_F, w_R
+        Parameters:
+        -----------
+        potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states, max_total_snapshots)
+            Reduced potential energy matrix
+        sample_counts : np.ndarray, shape (num_lambda_states,), optional
+            Number of samples per state
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kcal'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name
+
+        Returns:
+        --------
+        Tuple[float, float] : (total_free_energy, total_error) in specified units
+        """
+        ExponentialAveraging._validate_potential_energies(
+            potential_energies, sample_counts
+        )
+
+        # Calculate work values for all intervals
+        _, w_R_all = ExponentialAveraging._calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
+
+        # Calculate free energy for each interval
+        total_dg = 0.0
+        total_error_variance = 0.0
+
+        for lambda_state_i, w_R in enumerate(w_R_all):
+            if len(w_R) == 0:
+                continue
+
+            dg_interval, ddg_interval = (
+                ExponentialAveraging._calculate_interval_free_energy(
+                    w_R, 'IEXP', temperature, units, software, negate_result=True
+                )
+            )
+
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
+
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
+
+    @staticmethod
+    def compute_gdel(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
+        temperature: float = 298.15,
+        units: str = 'kcal',
+        software: str = 'Gromacs',
+    ) -> tuple[float, float]:
+        """
+        Compute total GDEL (Gaussian deletion) across all lambda intervals.
+
+        Parameters and returns same as compute_dexp.
+        """
+        ExponentialAveraging._validate_potential_energies(
+            potential_energies, sample_counts
+        )
+
+        w_F_all, _ = ExponentialAveraging._calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
+
+        total_dg = 0.0
+        total_error_variance = 0.0
+
+        for lambda_state_i, w_F in enumerate(w_F_all):
+            if len(w_F) == 0:
+                continue
+
+            dg_interval, ddg_interval = (
+                ExponentialAveraging._calculate_interval_free_energy(
+                    w_F, 'GDEL', temperature, units, software, negate_result=False
+                )
+            )
+
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
+
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
+
+    @staticmethod
+    def compute_gins(
+        potential_energies: np.ndarray,
+        sample_counts: Optional[np.ndarray] = None,
+        temperature: float = 298.15,
+        units: str = 'kcal',
+        software: str = 'Gromacs',
+    ) -> tuple[float, float]:
+        """
+        Compute total GINS (Gaussian insertion) across all lambda intervals.
+
+        Parameters and returns same as compute_iexp.
+        """
+        ExponentialAveraging._validate_potential_energies(
+            potential_energies, sample_counts
+        )
+
+        _, w_R_all = ExponentialAveraging._calculate_work_values_all_intervals(
+            potential_energies, sample_counts
+        )
+
+        total_dg = 0.0
+        total_error_variance = 0.0
+
+        for lambda_state_i, w_R in enumerate(w_R_all):
+            if len(w_R) == 0:
+                continue
+
+            dg_interval, ddg_interval = (
+                ExponentialAveraging._calculate_interval_free_energy(
+                    w_R, 'GINS', temperature, units, software, negate_result=True
+                )
+            )
+
+            total_dg += dg_interval
+            total_error_variance += ddg_interval**2
+
+        total_error = np.sqrt(total_error_variance)
+        return total_dg, total_error
 
 
 # TODO: need to double check this implementation
@@ -1222,6 +1050,306 @@ class BennettAcceptanceRatio:
             results['RBAR'] = (float('inf'), float('inf'))
 
         return results
+
+
+class MultistateBAR:
+    """
+    Multistate Bennett Acceptance Ratio implementation.
+
+    Faithfully adapted from alchemical_analysis.py MBAR functionality.
+    """
+
+    @staticmethod
+    def _estimatewithMBAR_core(
+        uncorr_potential_energies: np.ndarray,
+        num_uncorr_samples_per_state: np.ndarray,
+        beta_report: float,
+        relative_tolerance: float = 1e-10,
+        regular_estimate: bool = False,
+        verbose: bool = False,
+        initialize: str = 'BAR',
+    ) -> tuple:
+        """
+        Core MBAR estimation function - direct adaptation from alchemical_analysis.py.
+
+        This implements the exact `estimatewithMBAR` logic from the original code
+        but uses modern parameter naming.
+
+        Parameters:
+        -----------
+        uncorr_potential_energies : np.ndarray, shape (K, K, max_N)
+            Reduced potential energy matrix where [k,l,n] is the reduced potential
+            of snapshot n from state k evaluated at state l
+        num_uncorr_samples_per_state : np.ndarray, shape (K,)
+            Number of samples from each state k
+        relative_tolerance : float, default 1e-10
+            Relative tolerance for MBAR convergence
+        regular_estimate : bool, default False
+            If True, return full matrices; if False, return only endpoint difference
+        verbose : bool, default False
+            Enable verbose pymbar output
+        initialize : str, default 'BAR'
+            MBAR initialization method ('BAR' or 'zeros')
+        beta_report : float, optional
+            Unit conversion factor from original alchemical_analysis.py
+
+        Returns:
+        --------
+        If regular_estimate=True: (Deltaf_ij, dDeltaf_ij, mbar_object)
+            Full free energy difference matrices and MBAR object
+        If regular_estimate=False: (total_dg, total_error)
+            Single endpoint free energy difference and error
+        """
+        try:
+            # Initialize MBAR exactly as in original (using original parameter names internally)
+            MBAR = pymbar.mbar.MBAR(
+                uncorr_potential_energies,
+                num_uncorr_samples_per_state,
+                verbose=verbose,
+                relative_tolerance=relative_tolerance,
+                initialize=initialize,
+            )
+
+            # Get free energy differences exactly as in original
+            # note that theta_ij (marked as "_") is never used in the original code - by JJH-2025-06-24  # noqa: E501
+            (Deltaf_ij, dDeltaf_ij, _) = MBAR.getFreeEnergyDifferences(
+                uncertainty_method='svd-ew', return_theta=True
+            )
+
+            if verbose:
+                logger.info(
+                    f"Matrix of free energy differences\nDeltaf_ij:\n{Deltaf_ij}\ndDeltaf_ij:\n{dDeltaf_ij}"  # noqa: E501
+                )
+
+            # Return format matches original exactly
+            if regular_estimate:
+                return (Deltaf_ij, dDeltaf_ij, MBAR)
+            else:
+                K = len(num_uncorr_samples_per_state)
+                return (
+                    Deltaf_ij[0, K - 1] / beta_report,
+                    dDeltaf_ij[0, K - 1] / beta_report,
+                    MBAR,
+                )
+
+        except Exception as e:
+            logger.error(f"MBAR calculation failed: {e}")
+            raise
+
+    @staticmethod
+    def compute_mbar(
+        uncorr_potential_energies: np.ndarray,
+        num_uncorr_samples_per_state: np.ndarray,
+        temperature: float = 298.15,
+        units: str = 'kJ',
+        software: str = 'Gromacs',
+        regular_estimate: bool = True,
+        **kwargs,
+    ) -> dict:
+        """
+        Compute MBAR estimates for all states.
+        Adapted from alchemical_analysis.py estimatewithMBAR function.
+
+        Parameters:
+        -----------
+        uncorr_potential_energies : np.ndarray, shape (num_lambda_states, num_lambda_states,
+        max_num_snapshots)
+            Reduced potential energy matrix where:
+            - First index (k): lambda state where snapshots were generated
+            - Second index (l): lambda state where energy is evaluated
+            - Third index (n): snapshot/time index
+            Example: uncorr_potential_energies[1, 3, :] = energies of λ₁ snapshots evaluated at λ₃
+        num_uncorr_samples_per_state : np.ndarray, shape (num_lambda_states,)
+            Number of samples from each lambda state
+        temperature : float, default 298.15
+            Temperature in Kelvin
+        units : str, default 'kJ'
+            Output units: 'kJ', 'kcal', or 'kBT'
+        software : str, default 'Gromacs'
+            Software package name (affects unit handling)
+        **kwargs : dict
+            Additional MBAR parameters (relative_tolerance, verbose, initialize)
+
+        Returns:
+        --------
+        Dict : MBAR results including free energies and errors
+            All energies converted according to specified units
+            - 'total_dg': Total free energy change (kJ/mol)
+            - 'total_error': Total error estimate (kJ/mol)
+            - 'free_energies': Free energies relative to first state (kJ/mol)
+            - 'free_energy_errors': Error estimates for each state (kJ/mol)
+            - 'Deltaf_ij': Pairwise free energy differences matrix (kJ/mol)
+            - 'dDeltaf_ij': Error matrix for pairwise differences (kJ/mol)
+            - 'theta_ij': Theta matrix from MBAR
+            - 'mbar_object': The pymbar MBAR object
+            - 'n_states': Number of lambda states
+        """
+        # Extract parameters with original defaults
+        relative_tolerance = kwargs.get('relative_tolerance', 1e-10)
+        verbose = kwargs.get('verbose', False)
+        initialize = kwargs.get('initialize', 'BAR')
+        compute_overlap = kwargs.get('compute_overlap', False)
+
+        # Calculate beta parameters exactly as in original
+        beta_report = calculate_beta_parameter(
+            temperature=temperature, units=units, software=software
+        )
+
+        try:
+            if regular_estimate:
+                Deltaf_ij, dDeltaf_ij, mbar_object = (
+                    MultistateBAR._estimatewithMBAR_core(
+                        uncorr_potential_energies=uncorr_potential_energies,
+                        num_uncorr_samples_per_state=num_uncorr_samples_per_state,
+                        relative_tolerance=relative_tolerance,
+                        regular_estimate=regular_estimate,
+                        verbose=verbose,
+                        initialize=initialize,
+                        beta_report=beta_report,
+                    )
+                )
+
+                # Convert to physical units using proper beta_report
+                free_energies = Deltaf_ij[0, :] / beta_report
+                free_energy_errors = dDeltaf_ij[0, :] / beta_report
+
+                # Total free energy change (first to last state)
+                total_dg = free_energies[-1] - free_energies[0]
+                total_error = np.sqrt(
+                    free_energy_errors[0] ** 2 + free_energy_errors[-1] ** 2
+                )
+
+                # Determine unit string for output
+                unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
+                    units.lower()
+                ]
+
+                result = {
+                    'total_dg': total_dg,
+                    'total_error': total_error,
+                    'free_energies': free_energies,
+                    'free_energy_errors': free_energy_errors,
+                    'Deltaf_ij': Deltaf_ij / beta_report,
+                    'dDeltaf_ij': dDeltaf_ij / beta_report,
+                    'mbar_object': mbar_object,
+                    'n_states': len(num_uncorr_samples_per_state),
+                    'units': unit_string,
+                    'beta_report': beta_report,
+                    'temperature': temperature,
+                }
+
+                # Compute overlap matrix if requested (matches original)
+                if compute_overlap:
+                    overlap_matrix = mbar_object.computeOverlap()[
+                        2
+                    ]  # Exact original syntax
+                    result['overlap_matrix'] = overlap_matrix
+
+                return result
+
+            else:
+                # Simple case - returns already converted values
+                total_dg, total_error = MultistateBAR._estimatewithMBAR_core(
+                    uncorr_potential_energies=uncorr_potential_energies,
+                    num_uncorr_samples_per_state=num_uncorr_samples_per_state,
+                    relative_tolerance=relative_tolerance,
+                    regular_estimate=regular_estimate,
+                    verbose=verbose,
+                    initialize=initialize,
+                    beta_report=beta_report,
+                )
+
+                # Determine unit string for output
+                unit_string = {'kj': '(kJ/mol)', 'kcal': '(kcal/mol)', 'kbt': '(k_BT)'}[
+                    units.lower()
+                ]
+
+                return {
+                    'total_dg': total_dg,
+                    'total_error': total_error,
+                    'units': unit_string,
+                    'beta_report': beta_report,
+                    'temperature': temperature,
+                    'n_states': len(num_uncorr_samples_per_state),
+                }
+
+        except Exception as e:
+            logger.error(f"MBAR calculation failed: {e}")
+            raise
+
+    @staticmethod
+    def plot_overlap_matrix(overlap_matrix: np.ndarray, output_path: Path):
+        """
+        Plot overlap matrix adapted from alchemical_analysis.py plotOverlapMatrix.
+
+        Parameters:
+        -----------
+        overlap_matrix : np.ndarray, shape (num_lambda_states, num_lambda_states)
+            MBAR overlap matrix showing phase space overlap between lambda states
+        output_path : Path
+            Output file path for plot
+        """
+        try:
+            import matplotlib.pyplot as plt
+
+            num_lambda_states = overlap_matrix.shape[0]
+            max_prob = overlap_matrix.max()
+
+            fig, ax = plt.subplots(
+                figsize=(num_lambda_states / 2.0, num_lambda_states / 2.0)
+            )
+
+            im = ax.imshow(overlap_matrix, cmap='Blues', vmin=0, vmax=max_prob)
+
+            for i in range(num_lambda_states):
+                for j in range(num_lambda_states):
+                    prob = overlap_matrix[i, j]
+                    if prob < 0.005:
+                        text = ''
+                    elif prob > 0.995:
+                        text = '1.00'
+                    else:
+                        text = f"{prob:.2f}"[1:]  # Remove leading 0 (original behavior)
+
+                    color = 'white' if prob > max_prob / 2 else 'black'
+                    ax.text(
+                        j, i, text, ha='center', va='center', color=color, fontsize=8
+                    )
+
+            ax.set_xlabel('Lambda State')
+            ax.set_ylabel('Lambda State')
+            ax.set_title('MBAR Overlap Matrix')
+
+            plt.colorbar(im, ax=ax, label='Overlap Probability')
+
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+
+            logger.info(f"Overlap matrix plot saved to {output_path}")
+
+        except ImportError:
+            logger.warning("matplotlib not available for overlap matrix plotting")
+        except Exception as e:
+            logger.error(f"Failed to plot overlap matrix: {e}")
+
+    @staticmethod
+    def print_overlap_summary(overlap_matrix: np.ndarray):
+        """
+        Print overlap matrix summary as in original alchemical_analysis.py.
+
+        Parameters:
+        -----------
+        overlap_matrix : np.ndarray, shape (num_lambda_states, num_lambda_states)
+            MBAR overlap matrix
+        """
+        num_lambda_states = overlap_matrix.shape[0]
+        logger.info("The overlap matrix is...")
+        for k in range(num_lambda_states):
+            line = ''
+            for ll in range(num_lambda_states):
+                line += ' %5.2f ' % overlap_matrix[k, ll]
+            logger.info(line)
 
 
 class FreeEnergyEstimator:
