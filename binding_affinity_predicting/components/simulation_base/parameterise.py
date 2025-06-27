@@ -4,7 +4,7 @@ from typing import Optional
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
-from binding_affinity_predicting.simulation.utils import (
+from binding_affinity_predicting.components.simulation_base.utils import (
     rename_lig,
     save_system_to_local,
 )

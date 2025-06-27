@@ -11,13 +11,18 @@ import shutil
 from pathlib import Path
 from typing import Optional, Sequence
 
-from binding_affinity_predicting.components.simulation import Simulation
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
-
 # from binding_affinity_predicting.data.enums import PreparationStage
-from binding_affinity_predicting.data.enums import LegType, PreparationStage, StageType
-from binding_affinity_predicting.data.schemas import (
+from binding_affinity_predicting.components.data.enums import (
+    LegType,
+    PreparationStage,
+    StageType,
+)
+from binding_affinity_predicting.components.data.schemas import (
     SomdFepSimulationConfig,
+)
+from binding_affinity_predicting.components.simulation_fep.simulation import Simulation
+from binding_affinity_predicting.components.simulation_fep.simulation_runner import (
+    SimulationRunner,
 )
 
 # Notes from the paper - by JJ-2025-05-06

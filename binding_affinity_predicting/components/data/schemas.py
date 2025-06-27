@@ -3,7 +3,7 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-from binding_affinity_predicting.data.enums import (
+from binding_affinity_predicting.components.data.enums import (
     LegType,
     SimulationRestraint,
     StageType,

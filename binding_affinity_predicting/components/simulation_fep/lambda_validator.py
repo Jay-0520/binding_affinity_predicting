@@ -1,17 +1,11 @@
+"""
+work in progress - by JJH-2025-06-26
+"""
+
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Optional
-
-import numpy as np
-
-from binding_affinity_predicting.components.gromacs_orchestration import (
-    Calculation,
-    LambdaWindow,
-    Leg,
-)
-from binding_affinity_predicting.data.enums import LegType
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +256,8 @@ class LambdaVectorValidator:
             )
         elif n_windows < 4:
             warnings.append(
-                f"{stage.value} stage has only {n_windows} windows, consider more for better convergence"
+                f"{stage.value} stage has only {n_windows} windows, consider more "
+                "for better convergence"
             )
 
         return errors, warnings

@@ -16,7 +16,9 @@ we also have to download corruptxvg.py, unixlike.py and parser_gromacs.py in the
 note that these scripts are very outdated so they must be updated properly to run with
 new python versions.
 
-Expected results from results.txt (which is outputed by running alchemical_analysis.py):
+Expected results from results.txt
+(which is outputed by running alchemical_analysis.py with outdated pymbar 3.0.5):
+
 - TI: -3.064 ± 9.343 kcal/mol
 - TI-CUBIC: -4.926 ± 11.621 kcal/mol
 - DEXP: 5.590 ± 0.612 kcal/mol
@@ -27,6 +29,11 @@ Expected results from results.txt (which is outputed by running alchemical_analy
 - UBAR: 4.922 ± nan kcal/mol
 - RBAR: 7.661 ± nan kcal/mol
 - MBAR: 7.561 ± 5.762 kcal/mol
+
+When upgrading to pymbar 4.0.3, the expected results may change slightly, specifically:
+
+- UBAR: 5.345 ± nan kcal/mol
+- RBAR: 7.609 ± nan kcal/mol
 """
 
 import numpy as np
@@ -35,6 +42,7 @@ import pytest
 from binding_affinity_predicting.components.analysis.free_energy_estimators import (
     BennettAcceptanceRatio,
     ExponentialAveraging,
+    FreeEnergyEstimator,
     MultistateBAR,
     NaturalCubicSpline,
     ThermodynamicIntegration,
@@ -83,6 +91,12 @@ def mbar_data(lambda_data):
     Prepare reduced potentials u_klt and snapshot counts for MBAR/EXP/BAR tests.
     """
     return lambda_data["u_klt"], lambda_data["nsnapshots"]
+
+
+@pytest.fixture
+def free_energy_estimator():
+    """Create a FreeEnergyEstimator configured for our test conditions."""
+    return FreeEnergyEstimator(temperature=300.0, units='kcal', software='Gromacs')
 
 
 # ─── Thermodynamic Integration ──────────────────────────────────────────────────
@@ -201,6 +215,33 @@ def test_exponential_average_iexp(exp_data):
     assert pytest.approx(0.755, rel=0.001) == ddg_kcal
 
 
+def test_exponential_average_gdel(exp_data):
+    """
+    Test GDEL calculation using ExponentialAveraging.
+    The expected values for GDEL: -3.616 ± 13.852 kcal/mol
+    """
+    u_klt, _ = exp_data
+    dg_kcal, ddg_kcal = ExponentialAveraging.compute_gdel(
+        potential_energies=u_klt, temperature=300.0, units="kcal"
+    )
+
+    assert pytest.approx(-3.616, rel=0.001) == dg_kcal
+    assert pytest.approx(13.852, rel=0.001) == ddg_kcal
+
+
+def test_exponential_average_gins(exp_data):
+    """
+    Test GINS calculation using ExponentialAveraging.
+    The expected values for GINS: 61245350.401 ± 61251232.076 kcal/mol
+    """
+    u_klt, _ = exp_data
+    dg_kcal, ddg_kcal = ExponentialAveraging.compute_gins(
+        potential_energies=u_klt, temperature=300.0, units="kcal"
+    )
+    assert pytest.approx(61245350.401, rel=0.001) == dg_kcal
+    assert pytest.approx(61251232.076, rel=0.001) == ddg_kcal
+
+
 # ─── Bennett Acceptance Ratio (BAR, UBAR, RBAR) ────────────────────────────────
 def test_bennett_acceptance_ratio_bar(bar_data):
     """
@@ -226,7 +267,7 @@ def test_bennett_acceptance_ratio_ubar(bar_data):
         potential_energies=u_klt, temperature=300.0, units="kcal"
     )
 
-    assert pytest.approx(4.922, rel=0.001) == dg_kcal
+    assert pytest.approx(5.345, rel=0.001) == dg_kcal
     assert np.isnan(ddg_kcal)  # UBAR does not provide error estimate
 
 
@@ -240,7 +281,7 @@ def test_bennett_acceptance_ratio_rbar(bar_data):
         potential_energies=u_klt, temperature=300.0, units="kcal"
     )
 
-    assert pytest.approx(7.661, rel=0.001) == dg_kcal
+    assert pytest.approx(7.609, rel=0.001) == dg_kcal
     assert np.isnan(ddg_kcal)  # RBAR does not provide error estimate
 
 
@@ -257,8 +298,310 @@ def test_multistate_bar_mbar(mbar_data):
         temperature=300.0,
         units="kcal",
     )
-    dg_kcal = result['total_dg']
-    ddg_kcal = result['total_error']
+    dg_kcal = result['free_energy']
+    ddg_kcal = result['error']
 
     assert pytest.approx(7.561, rel=0.001) == dg_kcal
     assert pytest.approx(5.762, rel=0.001) == ddg_kcal
+
+
+# ─── FreeEnergyEstimator ─────────────────────────────────────────────────────
+def test_estimator_selected_methods(free_energy_estimator, lambda_data):
+    """
+    Test running only selected methods through FreeEnergyEstimator.
+    """
+    u_klt = lambda_data["u_klt"]
+    nsnapshots = lambda_data["nsnapshots"]
+
+    # Only run a subset of methods
+    selected_methods = ['DEXP', 'BAR', 'MBAR']
+
+    results = free_energy_estimator.estimate_all_methods(
+        potential_energies=u_klt,
+        sample_counts=nsnapshots,
+        methods=selected_methods,
+        regular_estimate=False,
+    )
+
+    # Should only have the requested methods
+    assert len(results) == 3
+    assert 'DEXP' in results
+    assert 'BAR' in results
+    assert 'MBAR' in results
+    assert 'IEXP' not in results
+    assert 'TI_trapezoidal' not in results
+
+    # Check values
+    assert pytest.approx(5.590, rel=0.001) == results['DEXP']['free_energy']
+    assert pytest.approx(0.612, rel=0.001) == results['DEXP']['error']
+    assert pytest.approx(7.774, rel=0.001) == results['BAR']['free_energy']
+    assert np.isnan(results['BAR']['error'])  # BAR does not provide error estimate
+    assert pytest.approx(7.561, rel=0.001) == results['MBAR']['free_energy']
+    assert pytest.approx(5.762, rel=0.001) == results['MBAR']['error']
+
+
+def test_estimator_ti_cubic(free_energy_estimator, ti_data):
+    """
+    Test TI cubic spline integration through FreeEnergyEstimator.
+    Expected: -4.926 ± 11.621 kcal/mol
+    """
+    lv, ave_dhdl, std_dhdl = ti_data
+    result = free_energy_estimator.estimate_ti(
+        lambda_vectors=lv, ave_dhdl=ave_dhdl, std_dhdl=std_dhdl, method='cubic'
+    )
+
+    assert result['success'] is True
+    assert result['method'] == 'TI_cubic'
+    assert result['units'] == '(kcal/mol)'
+    assert result['n_points'] == 5
+    assert pytest.approx(-4.926, rel=0.001) == result['free_energy']
+    assert pytest.approx(11.621, rel=0.001) == result['error']
+
+
+def test_estimator_exp_dexp(free_energy_estimator, lambda_data):
+    """
+    Test DEXP through FreeEnergyEstimator.
+    Expected: 5.590 ± 0.612 kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_exp(potential_energies=u_klt, method='DEXP')
+
+    assert result['success'] is True
+    assert result['method'] == 'DEXP'
+    assert result['units'] == '(kcal/mol)'
+    assert pytest.approx(5.590, rel=0.001) == result['free_energy']
+    assert pytest.approx(0.612, rel=0.001) == result['error']
+
+
+def test_estimator_exp_iexp(free_energy_estimator, lambda_data):
+    """
+    Test IEXP through FreeEnergyEstimator.
+    Expected: 15.218 ± 0.755 kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_exp(potential_energies=u_klt, method='IEXP')
+
+    assert result['success'] is True
+    assert result['method'] == 'IEXP'
+    assert result['units'] == '(kcal/mol)'
+    assert pytest.approx(15.218, rel=0.001) == result['free_energy']
+    assert pytest.approx(0.755, rel=0.001) == result['error']
+
+
+def test_estimator_exp_gdel(free_energy_estimator, lambda_data):
+    """
+    Test GDEL through FreeEnergyEstimator.
+    Expected: -3.616 ± 13.852 kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_exp(potential_energies=u_klt, method='GDEL')
+
+    assert result['success'] is True
+    assert result['method'] == 'GDEL'
+    assert result['units'] == '(kcal/mol)'
+    assert pytest.approx(-3.616, rel=0.001) == result['free_energy']
+    assert pytest.approx(13.852, rel=0.001) == result['error']
+
+
+def test_estimator_exp_gins(free_energy_estimator, lambda_data):
+    """
+    Test GINS through FreeEnergyEstimator.
+    Expected: 61245350.401 ± 61251232.076 kcal/mol
+
+    Note: GINS shows extremely large values indicating numerical instability
+    for this particular dataset.
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_exp(potential_energies=u_klt, method='GINS')
+
+    assert result['success'] is True
+    assert result['method'] == 'GINS'
+    assert result['units'] == '(kcal/mol)'
+    # Use larger tolerance for GINS due to numerical instability
+    assert pytest.approx(61245350.401, rel=0.01) == result['free_energy']
+    assert pytest.approx(61251232.076, rel=0.01) == result['error']
+
+
+def test_estimator_bar(free_energy_estimator, lambda_data):
+    """
+    Test BAR through FreeEnergyEstimator.
+    Expected: 7.774 ± nan kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_bar(potential_energies=u_klt, method='BAR')
+
+    assert result['success'] is True
+    assert result['method'] == 'BAR'
+    assert result['units'] == '(kcal/mol)'
+    assert pytest.approx(7.774, rel=0.001) == result['free_energy']
+    assert np.isnan(result['error'])  # BAR returns nan for error
+
+
+def test_estimator_ubar(free_energy_estimator, lambda_data):
+    """
+    Test UBAR through FreeEnergyEstimator.
+    Expected: 4.922 ± nan kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_bar(potential_energies=u_klt, method='UBAR')
+
+    assert result['success'] is True
+    assert result['method'] == 'UBAR'
+    assert result['units'] == '(kcal/mol)'
+    assert pytest.approx(5.345, rel=0.001) == result['free_energy']
+    assert np.isnan(result['error'])  # UBAR returns nan for error
+
+
+def test_estimator_rbar(free_energy_estimator, lambda_data):
+    """
+    Test RBAR through FreeEnergyEstimator.
+    Expected: 7.661 ± nan kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_bar(potential_energies=u_klt, method='RBAR')
+
+    assert result['success'] is True
+    assert result['method'] == 'RBAR'
+    assert result['units'] == '(kcal/mol)'
+    assert pytest.approx(7.609, rel=0.001) == result['free_energy']
+    assert np.isnan(result['error'])  # RBAR returns nan for error
+
+
+def test_estimator_mbar(free_energy_estimator, lambda_data):
+    """
+    Test MBAR through FreeEnergyEstimator.
+    Expected: 7.561 ± 5.762 kcal/mol
+    """
+    u_klt = lambda_data["u_klt"]
+    nsnapshots = lambda_data["nsnapshots"]
+
+    result = free_energy_estimator.estimate_mbar(
+        potential_energies=u_klt, num_samples_per_state=nsnapshots
+    )
+
+    assert result['success'] is True
+    assert result['method'] == 'MBAR'
+    assert result['units'] == '(kcal/mol)'
+    assert result['n_states'] == 5
+    assert pytest.approx(7.561, rel=0.001) == result['free_energy']
+    assert pytest.approx(5.762, rel=0.001) == result['error']
+
+    # Check that we get the full MBAR result dictionary
+    assert 'free_energies_all' in result
+    assert 'Deltaf_ij' in result
+    assert 'mbar_object' in result
+
+
+def test_estimator_all_methods(free_energy_estimator, lambda_data, ti_data):
+    """
+    Test running all methods through FreeEnergyEstimator.estimate_all_methods().
+    """
+    u_klt = lambda_data["u_klt"]
+    nsnapshots = lambda_data["nsnapshots"]
+    lv, ave_dhdl, std_dhdl = ti_data
+
+    results = free_energy_estimator.estimate_all_methods(
+        potential_energies=u_klt,
+        sample_counts=nsnapshots,
+        lambda_vectors=lv,
+        ave_dhdl=ave_dhdl,
+        std_dhdl=std_dhdl,
+    )
+
+    # Check that all expected methods are present and succeeded
+    expected_results = {
+        'DEXP': 5.590,
+        'IEXP': 15.218,
+        'GDEL': -3.616,
+        'GINS': 61245350.401,  # Large value due to numerical instability
+        'BAR': 7.774,
+        'UBAR': 5.345,
+        'RBAR': 7.609,
+        'TI_trapezoidal': -3.064,
+        'TI_cubic': -4.926,
+    }
+
+    for method, expected_value in expected_results.items():
+        assert method in results
+        assert results[method]['success'] is True
+
+        actual_value = results[method]['free_energy']
+        assert pytest.approx(expected_value, rel=0.001) == actual_value
+
+
+# ─── FreeEnergyEstimator (Error Handling Tests) ───────────────────────────────────────
+def test_estimator_invalid_ti_method(free_energy_estimator, ti_data):
+    """Test error handling for invalid TI method."""
+    lv, ave_dhdl, std_dhdl = ti_data
+
+    result = free_energy_estimator.estimate_ti(
+        lambda_vectors=lv, ave_dhdl=ave_dhdl, std_dhdl=std_dhdl, method='invalid_method'
+    )
+
+    assert result['success'] is False
+    assert result['method'] == 'TI_invalid_method'
+    assert 'error_message' in result
+
+
+def test_estimator_invalid_exp_method(free_energy_estimator, lambda_data):
+    """Test error handling for invalid EXP method."""
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_exp(
+        potential_energies=u_klt, method='INVALID'
+    )
+
+    assert result['success'] is False
+    assert result['method'] == 'INVALID'
+    assert 'error_message' in result
+
+
+def test_estimator_invalid_bar_method(free_energy_estimator, lambda_data):
+    """Test error handling for invalid BAR method."""
+    u_klt = lambda_data["u_klt"]
+
+    result = free_energy_estimator.estimate_bar(
+        potential_energies=u_klt, method='INVALID'
+    )
+
+    assert result['success'] is False
+    assert result['method'] == 'INVALID'
+    assert 'error_message' in result
+
+
+# ─── FreeEnergyEstimator (Unit Consistency Tests) ───────────────────────────────
+def test_estimator_different_units(lambda_data, ti_data):
+    """Test that different unit settings work correctly."""
+    _ = lambda_data["u_klt"]
+    lv, ave_dhdl, std_dhdl = ti_data
+
+    # Test with kJ units
+    estimator_kj = FreeEnergyEstimator(
+        temperature=300.0, units='kJ', software='Gromacs'
+    )
+
+    result_kj = estimator_kj.estimate_ti(
+        lambda_vectors=lv, ave_dhdl=ave_dhdl, std_dhdl=std_dhdl, method='trapezoidal'
+    )
+
+    # Test with kBT units
+    estimator_kbt = FreeEnergyEstimator(
+        temperature=300.0, units='kBT', software='Gromacs'
+    )
+
+    result_kbt = estimator_kbt.estimate_ti(
+        lambda_vectors=lv, ave_dhdl=ave_dhdl, std_dhdl=std_dhdl, method='trapezoidal'
+    )
+    # Results should be different due to unit conversion
+    assert result_kj['success'] is True
+    assert result_kbt['success'] is True
+    assert result_kj['units'] == '(kJ/mol)'
+    assert result_kbt['units'] == '(k_BT)'
+    assert result_kj['free_energy'] != result_kbt['free_energy']

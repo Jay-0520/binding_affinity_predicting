@@ -7,7 +7,9 @@ import logging
 
 import pandas as pd
 
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
+from binding_affinity_predicting.components.simulation_fep.simulation_base import (
+    SimulationRunner,
+)
 
 logger = logging.getLogger(__name__)
 

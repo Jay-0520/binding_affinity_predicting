@@ -19,7 +19,7 @@ def pytest_configure():
         )
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def suppress_warnings():
     """Autouse fixture to suppress warnings at the session level."""
     with warnings.catch_warnings():
@@ -40,8 +40,9 @@ def suppress_warnings():
         # Suppress numpy matrix deprecation warnings from pymbar
         warnings.filterwarnings(
             "ignore",
-            message=".*matrix subclass is not the recommended way.*",
+            message=".*matrix subclass is not the recommended.*",
             category=PendingDeprecationWarning,
+            module=r"pymbar\.mbar",
         )
         warnings.filterwarnings(
             "ignore", category=PendingDeprecationWarning, module="pymbar.*"

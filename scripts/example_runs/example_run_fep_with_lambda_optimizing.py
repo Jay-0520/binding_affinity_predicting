@@ -1,13 +1,17 @@
 import logging
 
-from binding_affinity_predicting.components.gromacs_orchestration import Calculation
-from binding_affinity_predicting.components.lambda_optimizer import (
+from binding_affinity_predicting.components.data.enums import LegType
+from binding_affinity_predicting.components.data.schemas import (
+    GromacsFepSimulationConfig,
+)
+from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
+    Calculation,
+)
+from binding_affinity_predicting.components.simulation_fep.lambda_optimizer import (
     LambdaOptimizationManager,
     OptimizationConfig,
     StageConfig,
 )
-from binding_affinity_predicting.data.enums import LegType
-from binding_affinity_predicting.data.schemas import GromacsFepSimulationConfig
 
 logger = logging.getLogger(__name__)
 

@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from time import sleep
 from typing import Optional
 
-from binding_affinity_predicting.data.enums import JobStatus
-from binding_affinity_predicting.hpc_cluster.utils import retry
+from binding_affinity_predicting.components.data.enums import JobStatus
+from binding_affinity_predicting.components.supercluster.utils import retry
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

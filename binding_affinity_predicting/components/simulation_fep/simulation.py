@@ -5,12 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
-from binding_affinity_predicting.data.enums import JobStatus
-from binding_affinity_predicting.simulation.mdp_parameters import (
+from binding_affinity_predicting.components.data.enums import JobStatus
+from binding_affinity_predicting.components.simulation_base.mdp_parameters import (
     MDPGenerator,
     create_custom_mdp_generator,
 )
-from binding_affinity_predicting.simulation.slurm_parameters import (
+from binding_affinity_predicting.components.simulation_base.slurm_parameters import (
     SlurmSubmitGenerator,
     create_custom_slurm_generator,
 )

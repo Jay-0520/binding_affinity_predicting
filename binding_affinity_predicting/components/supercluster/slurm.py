@@ -3,8 +3,12 @@ import os
 from time import sleep
 from typing import Any, Callable
 
-from binding_affinity_predicting.hpc_cluster.utils import get_slurm_file_base
-from binding_affinity_predicting.hpc_cluster.virtual_queue import VirtualQueue
+from binding_affinity_predicting.components.supercluster.utils import (
+    get_slurm_file_base,
+)
+from binding_affinity_predicting.components.supercluster.virtual_queue import (
+    VirtualQueue,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

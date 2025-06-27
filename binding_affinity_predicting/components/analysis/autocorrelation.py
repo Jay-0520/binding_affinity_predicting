@@ -24,14 +24,14 @@ License along with this software. If not, see <http://www.gnu.org/licenses/>.
 
 __all__ = ["get_statistical_inefficiency"]
 
-from typing import Optional as _Optional
+from typing import Optional
 
-import numpy as _np
+import numpy as np
 
 
 def get_statistical_inefficiency(
-    A_n: _np.ndarray,
-    B_n: _Optional[_np.ndarray] = None,
+    A_n: np.ndarray,
+    B_n: Optional[np.ndarray] = None,
     fast: bool = False,
     mintime: int = 3,
 ) -> float:
@@ -73,12 +73,12 @@ def get_statistical_inefficiency(
     """
 
     # Create numpy copies of input arguments.
-    A_n = _np.array(A_n)
+    A_n = np.array(A_n)
 
     if B_n is not None:
-        B_n = _np.array(B_n)
+        B_n = np.array(B_n)
     else:
-        B_n = _np.array(A_n)
+        B_n = np.array(A_n)
 
     # Get the length of the timeseries.
     N = A_n.size
@@ -95,8 +95,8 @@ def get_statistical_inefficiency(
     mu_B = B_n.mean()
 
     # Make temporary copies of fluctuation from mean.
-    dA_n = A_n.astype(_np.float64) - mu_A
-    dB_n = B_n.astype(_np.float64) - mu_B
+    dA_n = A_n.astype(np.float64) - mu_A
+    dB_n = B_n.astype(np.float64) - mu_B
 
     # Compute estimator of covariance of (A,B) using estimator that will ensure C(0) = 1.
     sigma2_AB = (dA_n * dB_n).mean()  # standard estimator to ensure C(0) = 1
@@ -115,7 +115,7 @@ def get_statistical_inefficiency(
     increment = 1
     while t < N - 1:
         # compute normalized fluctuation correlation function at time t
-        C = _np.sum(dA_n[0 : (N - t)] * dB_n[t:N] + dB_n[0 : (N - t)] * dA_n[t:N]) / (
+        C = np.sum(dA_n[0 : (N - t)] * dB_n[t:N] + dB_n[0 : (N - t)] * dA_n[t:N]) / (
             2.0 * float(N - t) * sigma2_AB
         )
         # Terminate if the correlation function has crossed zero and we've computed the correlation

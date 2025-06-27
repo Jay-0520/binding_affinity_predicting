@@ -7,7 +7,7 @@ from typing import Any, Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS
 
-from binding_affinity_predicting.data.schemas import BaseWorkflowConfig
+from binding_affinity_predicting.components.data.schemas import BaseWorkflowConfig
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

@@ -3,7 +3,7 @@ from typing import Callable, Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
-from binding_affinity_predicting.simulation.utils import (
+from binding_affinity_predicting.components.simulation_base.utils import (
     decouple_ligand_in_system,
     load_system_from_source,
     save_system_to_local,

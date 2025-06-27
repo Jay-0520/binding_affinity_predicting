@@ -7,11 +7,14 @@ from pathlib import Path
 from time import sleep
 from typing import Optional
 
-from binding_affinity_predicting.components.utils import (
+from binding_affinity_predicting.components.data.enums import JobStatus
+from binding_affinity_predicting.components.simulation_fep.utils import (
     ensure_dir_exist,
 )
-from binding_affinity_predicting.data.enums import JobStatus
-from binding_affinity_predicting.hpc_cluster.virtual_queue import Job, VirtualQueue
+from binding_affinity_predicting.components.supercluster.virtual_queue import (
+    Job,
+    VirtualQueue,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

@@ -18,14 +18,14 @@ from typing import Optional
 import numpy as np
 from pydantic import Field
 
-from binding_affinity_predicting.components.gromacs_orchestration import (
+from binding_affinity_predicting.components.analysis.autocorrelation import (
+    get_statistical_inefficiency as _get_statistical_inefficiency,
+)
+from binding_affinity_predicting.components.data.enums import LegType
+from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
     Calculation,
     LambdaWindow,
     Leg,
-)
-from binding_affinity_predicting.data.enums import LegType
-from binding_affinity_predicting.simulation.autocorrelation import (
-    get_statistical_inefficiency as _get_statistical_inefficiency,
 )
 
 logger = logging.getLogger(__name__)
