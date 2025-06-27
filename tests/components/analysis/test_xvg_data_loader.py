@@ -3,6 +3,13 @@ Tests for GromacsXVGParser and load_alchemical_data function.
 
 These tests validate parsing of GROMACS XVG files and ensure the output
 format matches the expected structure used by free energy estimators.
+
+tests are constructed to ensure that the parser correctly interprets
+GROMACS XVG files, extracts relevant data, and handles various edge cases, in the same way
+as parser_gromacs.py:
+https://github.com/MobleyLab/alchemical-analysis/blob/master/alchemical_analysis/parser_gromacs.py
+
+the lambda_data.pkl contains the expected output data produced by the parser_gromacs.py
 """
 
 import pickle
@@ -169,9 +176,11 @@ def test_parse_xvg_file_with_skip_time(xvg_file_paths):
 
 def test_load_alchemical_data_basic(xvg_file_paths):
     """Test basic loading of alchemical data from multiple files."""
-    dhdl_timeseries, potential_energies, lambda_vectors, nsnapshots = (
-        load_alchemical_data(xvg_file_paths, skip_time=0.0)
-    )
+    results = load_alchemical_data(xvg_file_paths, skip_time=0.0)
+    dhdl_timeseries = results['dhdl_timeseries']
+    potential_energies = results['potential_energies']
+    lambda_vectors = results['lambda_vectors']
+    nsnapshots = results['nsnapshots']
 
     # Verify shapes
     num_states = 5
@@ -243,9 +252,13 @@ def test_load_alchemical_data_save_to_pickle(xvg_file_paths, tmp_path):
     save_path = tmp_path / "test_data.pkl"
 
     # Load and save data
-    dhdl_timeseries, potential_energies, lambda_vectors, nsnapshots = (
-        load_alchemical_data(xvg_file_paths, skip_time=0.0, save_to_path=save_path)
+    results = load_alchemical_data(
+        xvg_file_paths, skip_time=0.0, save_to_path=save_path
     )
+    dhdl_timeseries = results['dhdl_timeseries']
+    potential_energies = results['potential_energies']
+    lambda_vectors = results['lambda_vectors']
+    nsnapshots = results['nsnapshots']
 
     # Verify file was created
     assert save_path.exists()
