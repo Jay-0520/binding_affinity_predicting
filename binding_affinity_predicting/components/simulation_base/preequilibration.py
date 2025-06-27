@@ -3,13 +3,13 @@ from typing import Optional, Sequence, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
-from binding_affinity_predicting.components.utils import check_has_wat_and_box
-from binding_affinity_predicting.data.enums import PreparationStage
-from binding_affinity_predicting.data.schemas import (
+from binding_affinity_predicting.components.data.enums import PreparationStage
+from binding_affinity_predicting.components.data.schemas import (
     EnsembleEquilibrationReplicaConfig,
     PreEquilStageConfig,
 )
-from binding_affinity_predicting.simulation.utils import (
+from binding_affinity_predicting.components.simulation_base.utils import (
+    check_has_wat_and_box,
     decouple_ligand_in_system,
     load_fresh_system,
     load_system_from_source,

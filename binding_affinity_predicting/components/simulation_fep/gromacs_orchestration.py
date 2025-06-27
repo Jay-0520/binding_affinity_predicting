@@ -17,18 +17,29 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from binding_affinity_predicting.components.simulation import Simulation
-from binding_affinity_predicting.components.simulation_base import SimulationRunner
-from binding_affinity_predicting.data.enums import JobStatus, LegType, PreparationStage
-from binding_affinity_predicting.data.schemas import GromacsFepSimulationConfig
-from binding_affinity_predicting.hpc_cluster.virtual_queue import Job, VirtualQueue
-from binding_affinity_predicting.simulation.mdp_parameters import (
+from binding_affinity_predicting.components.data.enums import (
+    JobStatus,
+    LegType,
+    PreparationStage,
+)
+from binding_affinity_predicting.components.data.schemas import (
+    GromacsFepSimulationConfig,
+)
+from binding_affinity_predicting.components.simulation_base.mdp_parameters import (
     MDPGenerator,
     create_custom_mdp_generator,
 )
-from binding_affinity_predicting.simulation.slurm_parameters import (
+from binding_affinity_predicting.components.simulation_base.slurm_parameters import (
     SlurmSubmitGenerator,
     create_custom_slurm_generator,
+)
+from binding_affinity_predicting.components.simulation_fep.simulation import Simulation
+from binding_affinity_predicting.components.simulation_fep.simulation_runner import (
+    SimulationRunner,
+)
+from binding_affinity_predicting.components.supercluster.virtual_queue import (
+    Job,
+    VirtualQueue,
 )
 
 logger = logging.getLogger(__name__)

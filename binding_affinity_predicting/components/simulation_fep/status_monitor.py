@@ -6,9 +6,11 @@ Works with Calculation, Leg, LambdaWindow, and Simulation objects.
 from pathlib import Path
 from typing import Any
 
-from binding_affinity_predicting.components.gromacs_orchestration import Calculation
-from binding_affinity_predicting.components.simulation import Simulation
-from binding_affinity_predicting.data.enums import JobStatus
+from binding_affinity_predicting.components.data.enums import JobStatus
+from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
+    Calculation,
+)
+from binding_affinity_predicting.components.simulation_fep.simulation import Simulation
 
 
 class StatusMonitor:

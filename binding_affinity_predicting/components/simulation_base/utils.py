@@ -301,3 +301,11 @@ def load_fresh_system(
         fresh = load_system_from_source(source=gro_path)
 
     return fresh
+
+
+def check_has_wat_and_box(system: BSS._SireWrappers._system.System) -> None:
+    """Check that the system has water and a box."""
+    if system.getBox() == (None, None):
+        raise ValueError("System does not have a box.")
+    if system.nWaterMolecules() == 0:
+        raise ValueError("System does not have water.")
