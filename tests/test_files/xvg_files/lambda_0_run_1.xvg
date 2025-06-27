@@ -1,0 +1,37 @@
+# This file was created Wed Jun 25 11:16:29 2025
+# Created by:
+#                      :-) GROMACS - gmx mdrun, 2024.4 (-:
+# 
+# Executable:   /usr/local/gromacs/bin/gmx
+# Data prefix:  /usr/local/gromacs
+# Working dir:  /Users/jingjinghuang/Documents/fep_workflow/test_classes2/output/bound/lambda_0/run_1
+# Command line:
+#   gmx mdrun -deffnm lambda_0_run_1 -cpi lambda_0_run_1.cpt
+# gmx mdrun is part of G R O M A C S:
+#
+# Gnomes, ROck Monsters And Chili Sauce
+#
+@    title "dH/d\xl\f{} and \xD\f{}H"
+@    xaxis  label "Time (ps)"
+@    yaxis  label "dH/d\xl\f{} and \xD\f{}H (kJ/mol [\xl\f{}]\S-1\N)"
+@TYPE xy
+@ subtitle "T = 300 (K) \xl\f{} state 0: (coul-lambda, vdw-lambda, bonded-lambda) = (0.0000, 0.0000, 0.0000)"
+@ view 0.15, 0.15, 0.75, 0.85
+@ legend on
+@ legend box on
+@ legend loctype view
+@ legend 0.78, 0.8
+@ legend length 2
+@ s0 legend "Total Energy (kJ/mol)"
+@ s1 legend "dH/d\xl\f{} coul-lambda = 0.0000"
+@ s2 legend "dH/d\xl\f{} vdw-lambda = 0.0000"
+@ s3 legend "dH/d\xl\f{} bonded-lambda = 0.0000"
+@ s4 legend "\xD\f{}H \xl\f{} to (0.0000, 0.0000, 0.0000)"
+@ s5 legend "\xD\f{}H \xl\f{} to (0.0000, 0.0000, 0.5000)"
+@ s6 legend "\xD\f{}H \xl\f{} to (0.5000, 0.0000, 1.0000)"
+@ s7 legend "\xD\f{}H \xl\f{} to (1.0000, 0.5000, 1.0000)"
+@ s8 legend "\xD\f{}H \xl\f{} to (1.0000, 1.0000, 1.0000)"
+@ s9 legend "pV (kJ/mol)"
+0.0000000000 -380888.7800000000 10.0166860000 -7.3274460000 0.0000000000 0.0000000000 0.0000000000 5.0083801000 32.4821130000 71.1930830000 21.1517680000
+0.2000000000 -381696.6600000000 2.1544285000 -76.9485090000 0.0000000000 0.0000000000 0.0000000000 1.0772168000 12.8709690000 52.7155780000 19.2763390000
+0.4000000000 -381547.3800000000 4.4533138000 -28.8813420000 0.0000000000 0.0000000000 0.0000000000 2.2266514000 26.5258170000 68.9842850000 18.7370720000

@@ -60,6 +60,15 @@ def suppress_warnings():
 
 
 @pytest.fixture(scope="module")
+def test_data_dir() -> Path:
+    """
+    Provide the path to the test data directory.
+    This is used by tests to access various input files.
+    """
+    return TEST_DATA_DIR
+
+
+@pytest.fixture(scope="module")
 def example_structures(tmp_path_factory) -> str:
     """
     Copy the real PDB/SDF test files into a temp directory once
