@@ -18,14 +18,6 @@ def pytest_configure():
             category=DeprecationWarning,
         )
 
-    # Silence pymbar "matrix subclass" deprecation warnings
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*matrix subclass is not the recommended way to represent matrices.*",
-        category=PendingDeprecationWarning,
-        module=r"pymbar\..*",
-    )
-
 
 @pytest.fixture(scope="module", autouse=True)
 def suppress_warnings():
@@ -48,8 +40,9 @@ def suppress_warnings():
         # Suppress numpy matrix deprecation warnings from pymbar
         warnings.filterwarnings(
             "ignore",
-            message=".*matrix subclass is not the recommended way.*",
+            message=".*matrix subclass is not the recommended.*",
             category=PendingDeprecationWarning,
+            module=r"pymbar\.mbar",
         )
         warnings.filterwarnings(
             "ignore", category=PendingDeprecationWarning, module="pymbar.*"
