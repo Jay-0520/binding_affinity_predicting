@@ -60,7 +60,7 @@ pip install --no-deps .
 Prepare protein-ligand complex systems for FEP calculations:
 
 ```python
-from binding_affinity_predicting.data.schemas import BaseWorkflowConfig
+from binding_affinity_predicting.components.data.schemas import BaseWorkflowConfig
 from binding_affinity_predicting.workflows.free_energy_calc.system_prep_workflow import (
     run_complete_system_setup_bound_and_free
 )
@@ -87,11 +87,11 @@ system_list = run_complete_system_setup_bound_and_free(
 Run optimized free energy perturbation calculations:
 
 ```python
-from binding_affinity_predicting.components.lambda_optimizer import (
+from binding_affinity_predicting.components.simulation_fep.lambda_optimizer import (
     OptimizationConfig,
     GromacsFepSimulationConfig,
 )
-from binding_affinity_predicting.components.gromacs_orchestration import Calculation
+from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import Calculation
 
 # Initiate the calculation
 calc = Calculation(input_dir="~/input",

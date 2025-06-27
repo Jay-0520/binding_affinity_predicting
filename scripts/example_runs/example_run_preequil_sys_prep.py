@@ -1,13 +1,15 @@
 import logging
 import os
 
-from binding_affinity_predicting.components.utils import save_workflow_config
-from binding_affinity_predicting.data.schemas import (
+from binding_affinity_predicting.components.data.schemas import (
     BaseWorkflowConfig,
     EmpiricalPreEquilibrationConfig,
     EnergyMinimisationConfig,
     PreEquilStageConfig,
     SimulationRestraint,
+)
+from binding_affinity_predicting.components.simulation_fep.utils import (
+    save_workflow_config,
 )
 from binding_affinity_predicting.workflows.free_energy_calc.system_prep_workflow import (
     _prepare_equilibrated_molecular_systems,

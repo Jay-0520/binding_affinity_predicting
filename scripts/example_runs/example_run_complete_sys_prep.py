@@ -1,6 +1,6 @@
 import logging
 
-from binding_affinity_predicting.data.schemas import (
+from binding_affinity_predicting.components.data.schemas import (
     BaseWorkflowConfig,
     EmpiricalPreEquilibrationConfig,
     EnergyMinimisationConfig,
