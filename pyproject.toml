@@ -17,7 +17,7 @@ dependencies = [
      "numpy",
      "pandas",
      "scipy",
-     "pymbar==3.0.5",
+     "pymbar>=4.0",
      "pydantic==2.11.5",
      ]
 

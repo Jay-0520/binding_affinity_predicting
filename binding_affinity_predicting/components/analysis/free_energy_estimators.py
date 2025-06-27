@@ -616,15 +616,19 @@ class ExponentialAveraging:
         try:
             if method in ['DEXP', 'IEXP']:
                 # Use standard exponential averaging
-                import pymbar.exp
+                import pymbar.other_estimators
 
-                df_reduced, ddf_reduced = pymbar.exp.EXP(work_values)
+                results = pymbar.other_estimators.exp(work_values)
+                df_reduced = results['Delta_f']
+                ddf_reduced = results['dDelta_f']
 
             elif method in ['GDEL', 'GINS']:
                 # Use Gaussian exponential averaging
-                import pymbar.exp
+                import pymbar.other_estimators
 
-                df_reduced, ddf_reduced = pymbar.exp.EXPGauss(work_values)
+                results = pymbar.other_estimators.exp_gauss(work_values)
+                df_reduced = results['Delta_f']
+                ddf_reduced = results['dDelta_f']
 
             else:
                 raise ValueError(f"Unknown method: {method}")
@@ -891,18 +895,22 @@ class BennettAcceptanceRatio:
         try:
             if method == 'BAR':
                 # Standard BAR with iteration
-                (df_reduced, ddf_reduced) = pymbar.bar.BAR(
+                results = pymbar.other_estimators.bar(
                     w_F, w_R, relative_tolerance=relative_tolerance, verbose=verbose
                 )
+                df_reduced = results['Delta_f']
+                ddf_reduced = results['dDelta_f']
 
             elif method == 'UBAR':
                 # Unoptimized BAR - assume dF is zero, just do one evaluation
-                (df_reduced, ddf_reduced) = pymbar.bar.BAR(
+                results = pymbar.other_estimators.bar(
                     w_F,
                     w_R,
                     verbose=verbose,
                     iterated_solution=False,  # Key difference from BAR
                 )
+                df_reduced = results['Delta_f']
+                ddf_reduced = results['dDelta_f']
 
             elif method == 'RBAR':
                 # Range-based BAR - test multiple trial values
@@ -914,14 +922,15 @@ class BennettAcceptanceRatio:
                 for trial_udf in range(trial_range[0], trial_range[1], 1):
                     try:
                         # Calculate UBAR with this trial free energy as initial guess
-                        (udf, uddf) = pymbar.bar.BAR(
+                        results = pymbar.other_estimators.bar(
                             w_F,
                             w_R,
                             verbose=verbose,
                             iterated_solution=False,
                             DeltaF=float(trial_udf),
                         )
-
+                        udf = results['Delta_f']
+                        uddf = results['dDelta_f']
                         # Check how well this satisfies the BAR equation
                         diff = abs(udf - trial_udf)
                         if diff < min_diff:
@@ -938,9 +947,10 @@ class BennettAcceptanceRatio:
                 if min_diff == 1e6:
                     # All trials failed, fall back to standard BAR
                     logger.warning("All RBAR trials failed, falling back to BAR")
-                    (df_reduced, ddf_reduced) = pymbar.bar.BAR(
+                    results = pymbar.other_estimators.bar(
                         w_F, w_R, relative_tolerance=relative_tolerance, verbose=verbose
                     )
+                    (df_reduced, ddf_reduced) = results['Delta_f'], results['dDelta_f']
                 else:
                     df_reduced = best_udf
                     ddf_reduced = best_uddf
@@ -1199,10 +1209,11 @@ class MultistateBAR:
 
             # Get free energy differences exactly as in original
             # note that theta_ij (marked as "_") is never used in the original code - by JJH-2025-06-24  # noqa: E501
-            (Deltaf_ij, dDeltaf_ij, _) = MBAR.getFreeEnergyDifferences(
+            results = MBAR.compute_free_energy_differences(
                 uncertainty_method='svd-ew', return_theta=True
             )
-
+            Deltaf_ij = results['Delta_f']
+            dDeltaf_ij = results['dDelta_f']
             if verbose:
                 logger.info(
                     f"Matrix of free energy differences\nDeltaf_ij:\n{Deltaf_ij}\ndDeltaf_ij:\n{dDeltaf_ij}"  # noqa: E501
