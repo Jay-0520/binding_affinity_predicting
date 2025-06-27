@@ -10,5 +10,4 @@ dependencies:
   - pydantic
   - ambertools
   - pymbar>=4.0
-  - alchemlyb==2.4.1  # need to pin this version to avoid issues with pymbar
   - biosimspace>=2023.4 # has to be installed via conda

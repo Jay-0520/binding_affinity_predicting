@@ -18,7 +18,6 @@ dependencies = [
      "pandas",
      "scipy",
      "pymbar>=4.0",
-     "ambertools",
      "pydantic==2.11.5",
      "alchemlyb==2.4.1",  # need to pin this version to avoid issues with pymbar
      ]
