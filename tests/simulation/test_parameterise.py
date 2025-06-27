@@ -3,7 +3,7 @@ import os
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 import pytest
 
-from binding_affinity_predicting.simulation.parameterise import (
+from binding_affinity_predicting.components.simulation_base.parameterise import (
     _parameterise_water,
     parameterise_system,
 )
