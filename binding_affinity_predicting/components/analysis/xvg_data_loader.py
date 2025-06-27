@@ -13,9 +13,13 @@ methods like MBAR, BAR, and thermodynamic integration.
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
+
+from binding_affinity_predicting.components.analysis.utils import (
+    calculate_beta_parameter,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -32,7 +36,7 @@ class LambdaState:
         self.state_id = state_id
 
     def __repr__(self):
-        return f"LambdaState({self.state_id}: coul={self.coul}, vdw={self.vdw}, bonded={self.bonded})"
+        return f"LambdaState({self.state_id}: coul={self.coul}, vdw={self.vdw}, bonded={self.bonded})"  # noqa: E501
 
     def to_vector(self) -> np.ndarray:
         """Convert to numpy array for use in algorithms."""
@@ -62,7 +66,7 @@ class GromacsXVGParser:
         @    xaxis  label "Time (ps)"
         @    yaxis  label "dH/dλ and λ (kJ mol⁻¹ [λ]⁻¹)"
         @TYPE xy
-        @ subtitle "T = 300 (K) λ state 1: (coul-lambda, vdw-lambda, bonded-lambda) = (0.0000, 0.1000, 0.2500)"
+        @ subtitle "T = 300 (K) λ state 1: (coul-lambda, vdw-lambda, bonded-lambda) = (0.0000, 0.1000, 0.2500)"  # noqa: E501
         @ view 0.15, 0.15, 0.75, 0.85
         @ legend on
         @ legend box on
@@ -72,7 +76,7 @@ class GromacsXVGParser:
         @ s0 legend "dH/dλ coul-lambda = 0.0000"
         @ s1 legend "dH/dλ vdw-lambda = 0.1000"
         @ s2 legend "dH/dλ bonded-lambda = 0.2500"
-        @ s3 legend "ΔH*λ to (0.0000, 0.0000, 0.0000)"  # NOTE: we must set calc-lambda-neighbors = -1 in mdp to get this
+        @ s3 legend "ΔH*λ to (0.0000, 0.0000, 0.0000)"  # NOTE: we must set calc-lambda-neighbors = -1 in mdp to get this  # noqa: E501
         @ s4 legend "ΔH*λ to (0.0000, 0.1000, 0.2500)"
         @ s5 legend "pV (kJ/mol)"
         0.0000 10.016686 24.389038 0.0000000 -0.98744838 0.0000000 21.151768
@@ -141,7 +145,8 @@ class GromacsXVGParser:
 
     def _parse_current_state(self, subtitle_line: str):
         """Extract current lambda state from subtitle line."""
-        # Example: @ subtitle "T = 300 (K) \\xl\\f{} state 13: (coul-lambda, vdw-lambda, bonded-lambda) = (0.7500, 0.0000, 1.0000)"
+        # Example: @ subtitle "T = 300 (K) \\xl\\f{} state 13: (coul-lambda,
+        # vdw-lambda, bonded-lambda) = (0.7500, 0.0000, 1.0000)"
         pattern = r'state (\d+):.*?=\s*\(([0-9.]+),\s*([0-9.]+),\s*([0-9.]+)\)'
         match = re.search(pattern, subtitle_line)
 
@@ -155,12 +160,13 @@ class GromacsXVGParser:
             logger.info(f"Found current state: {self.current_state}")
         else:
             raise ValueError(
-                f"Could not derive lambda state from subtitle: {subtitle_line} check XVG file format"
+                f"Could not derive lambda state from subtitle: {subtitle_line} "
+                f"check XVG file format"
             )
 
     def _parse_legend(self, legend_line: str):
         """Parse legend lines to identify column types."""
-        if 'dH/d\\xl\\f{}' in legend_line:
+        if ('dH/d\\xl\\f{}' in legend_line) or ('dH/dλ' in legend_line):
             # dH/dλ component
             if 'coul-lambda' in legend_line:
                 self.dhdl_components.append('coulomb')
@@ -169,7 +175,7 @@ class GromacsXVGParser:
             elif 'bonded-lambda' in legend_line:
                 self.dhdl_components.append('bonded')
 
-        elif '\\xD\\f{}H \\xl\\f{} to' in legend_line:
+        elif ('\\xD\\f{}H \\xl\\f{} to' in legend_line) or ('ΔH λ to' in legend_line):
             # Cross-evaluation to target state
             # Example: @ s4 legend "\\xD\\f{}H \\xl\\f{} to (0.0000, 0.0000, 0.0000)"
             pattern = r'to \(([0-9.]+),\s*([0-9.]+),\s*([0-9.]+)\)'
@@ -194,8 +200,10 @@ class GromacsXVGParser:
         """Parse the data section of the XVG file."""
         times = []
         total_energies = []
-        dhdl_data = {comp: [] for comp in self.dhdl_components}
-        cross_eval_data = {i: [] for i in range(len(self.cross_eval_states))}
+        dhdl_data: dict[str, list[float]] = {comp: [] for comp in self.dhdl_components}
+        cross_eval_data: dict[int, list[float]] = {
+            i: [] for i in range(len(self.cross_eval_states))
+        }
         pv_data = []
 
         with open(file_path, 'r') as f:
@@ -231,14 +239,21 @@ class GromacsXVGParser:
                             col_idx += 1
 
                     # Cross-evaluations (remaining columns except last)
+                    cross_eval_energies = []
                     for i in range(len(self.cross_eval_states)):
                         if col_idx < len(parts):
-                            cross_eval_data[i].append(float(parts[col_idx]))
+                            cross_eval_energies.append(float(parts[col_idx]))
                             col_idx += 1
 
-                    # pV term (last column)
+                    # pV term (last column) and it must be present
                     if col_idx < len(parts):
-                        pv_data.append(float(parts[col_idx]))
+                        pv_term = float(parts[col_idx])
+                        pv_data.append(pv_term)
+
+                    # Add pV to cross-evaluations like the original parser
+                    # This matches: u_klt = P.beta * ( data[r1:r2, :] + data[-1,:] )
+                    for i, cross_eval_energy in enumerate(cross_eval_energies):
+                        cross_eval_data[i].append(cross_eval_energy + pv_term)
 
                 except (ValueError, IndexError) as e:
                     logger.warning(
@@ -266,9 +281,12 @@ class GromacsXVGParser:
 def load_alchemical_data(
     xvg_files: list[Union[Path, str]],
     skip_time: float = 0.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    temperature: float = 298.15,
+    reduce_to_dimensionless: bool = True,
+    save_to_path: Optional[Path] = None,
+) -> dict[str, np.ndarray]:
     """
-    Load dhdl_timeseries and potential_energies from multiple GROMACS XVG files.
+    Load data (required for free energy estimators) from multiple GROMACS XVG files.
 
     Parameters:
     -----------
@@ -276,17 +294,27 @@ def load_alchemical_data(
         List of paths to GROMACS .xvg files (one per lambda state)
     skip_time : float
         Time to skip for equilibration (in ps)
-    verbose : bool
-        Print detailed parsing information
+    temperature : float, default 300.0
+        Temperature in Kelvin for beta calculation
+    reduce_to_dimensionless: bool, default True
+        If True, reduce potential energies to dimensionless values using beta
+    save_to_path: Optional[Path]
+        If provided, save the parsed data to this path as a .pickle file
 
     Returns:
     --------
-    dhdl_timeseries : np.ndarray, shape (num_states, num_components, max_snapshots)
-        Time series of dH/dλ values
-    potential_energies : np.ndarray, shape (num_states, num_states, max_snapshots)
-        Cross-evaluation energy differences
-    lambda_vectors : np.ndarray, shape (num_states, num_components)
-        Lambda parameter values for each state
+    dict[str, np.ndarray]
+        Dictionary containing:
+        dhdl_timeseries : np.ndarray, shape (num_states, num_components, max_snapshots)
+            Time series of dH/dλ values
+        potential_energies : np.ndarray, shape (num_states, num_states, max_snapshots)
+            Cross-evaluation energy differences (must be reduced and dimensionless):
+             - the total potential energy of the current configuration at every other
+             λ‐combination in the calculation.
+        lambda_vectors : np.ndarray, shape (num_states, num_components)
+            Lambda parameter values for each state
+        nsnapshots : np.ndarray, shape (num_states,)
+            Number of equilibrated snapshots per lambda state
     """
     parser = GromacsXVGParser()
     parsed_files = []
@@ -321,18 +349,23 @@ def load_alchemical_data(
     max_snapshots = max(len(data['times']) for data in parsed_files)
 
     logger.info(
-        f"Dataset dimensions: {num_states} states, {num_components} components, {max_snapshots} max snapshots"
+        f"Dataset dimensions: {num_states} states, {num_components} "
+        f"components, {max_snapshots} max snapshots"
     )
 
     # Initialize output arrays
     dhdl_timeseries = np.zeros((num_states, num_components, max_snapshots))
     potential_energies = np.zeros((num_states, num_states, max_snapshots))
     lambda_vectors = np.zeros((num_states, num_components))
+    nsnapshots = np.zeros(num_states, dtype=int)
 
     # Fill arrays with data
     for state_idx, data in enumerate(parsed_files):
         current_state = data['current_state']
         num_snapshots = len(data['times'])
+
+        # Store actual number of snapshots for this state
+        nsnapshots[state_idx] = num_snapshots
 
         # Store lambda vector
         lambda_vectors[state_idx] = current_state.to_vector()
@@ -352,6 +385,38 @@ def load_alchemical_data(
                     target_idx
                 ]
 
-    logger.info("Successfully loaded alchemical data arrays")
+    # Reduce potential energies to dimensionless values
+    if reduce_to_dimensionless:
+        beta = calculate_beta_parameter(
+            temperature=temperature, units='kJ', software='Gromacs'
+        )
+        potential_energies *= beta  # Convert to dimensionless
+    else:
+        logger.warning(
+            "Potential energies will not be reduced to dimensionless values. "
+            "This may affect free energy calculations."
+        )
 
-    return dhdl_timeseries, potential_energies, lambda_vectors
+    if save_to_path:
+        # Save parsed data to a pickle file
+        import pickle
+
+        with open(save_to_path, 'wb') as f:
+            pickle.dump(
+                {
+                    'dhdl_timeseries': dhdl_timeseries,
+                    'potential_energies': potential_energies,
+                    'lambda_vectors': lambda_vectors,
+                    'nsnapshots': nsnapshots,
+                },
+                f,
+            )
+        logger.info(f"Saved parsed data to {save_to_path}")
+
+    logger.info("Successfully loaded alchemical data arrays")
+    return {
+        'dhdl_timeseries': dhdl_timeseries,
+        'potential_energies': potential_energies,
+        'lambda_vectors': lambda_vectors,
+        'nsnapshots': nsnapshots,
+    }
