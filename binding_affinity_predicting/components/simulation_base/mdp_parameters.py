@@ -18,7 +18,7 @@ class MDPParameters(BaseModel):
     # Run control
     integrator: str = Field(default="sd", description="Stochastic leap-frog integrator")
     nsteps: int = Field(
-        default=250,
+        default=5_000,
         ge=1,
         description="Number of simulation steps (will be overridden by runtime_ns)",
     )

@@ -17,7 +17,9 @@ These scripts are used solely to generate reference free energy (`ΔG`) values f
 ## Generating Reference Data
 
 1. First generate a set of `*.xvg` files by performing a short FEP calculation
-2. use `parser_gromacs.py` to load `*.xvg` files and save lambda/energy matrices into a data file (e.g., `lambda_data.pkl`)
+2. Use `parser_gromacs.py` to load `*.xvg` files and save lambda/energy matrices into a data file (e.g., `lambda_data.pkl`).
+   - This data file will be used as direct input for testingthe new free energy estimators
+   
 3. Run:
 
    ```bash
@@ -29,21 +31,15 @@ These scripts are used solely to generate reference free energy (`ΔG`) values f
 
    - `results.txt` (human-readable summary)
    - `results.pickle` (full-precision data)
-
-5. Extract the `ΔG` values and uncertainties from `results.txt` or by loading `results.pickle`:
-
-   ```python
-   import pickle
-   data = pickle.load(open("results.pickle", "rb"))
-   ```
+   - `results.txt` contains `ΔG` values from various estimators which are the `reference data`
 
 ---
 
 ## Running the Test Suite
 
-With the reference data committed, run the corresponding pytests (e.g., `test_free_energy_estimators.py`)
+With the `reference data` committed, run the corresponding pytests (e.g., `test_free_energy_estimators.py`)
 
-Tests will compare our `ThermodynamicIntegration`, `ExponentialAveraging`, `BennettAcceptanceRatio`, `MultistateBAR`, etc., against the legacy script’s outputs.
+Tests will compare our `ThermodynamicIntegration`, `ExponentialAveraging`, `BennettAcceptanceRatio`, `MultistateBAR`, etc., against the legacy script’s outputs (a.k.a, the `reference data` ).
 
 ---
 
