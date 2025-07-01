@@ -55,8 +55,9 @@ def ti_data(lambda_data):
     Prepare lambda vectors, <dH/dλ> and std(dH/dλ) (already beta‐scaled)
     for TI tests.
     """
-    lv = lambda_data["lv"]  # shape (n_states, n_components) (5, 3)
-    dhdlt = lambda_data["dhdlt"]  # shape (n_states, n_components, n_samples) (5, 3, 3)
+    lv = lambda_data["lv"]        # shape (n_states, n_components) 
+    # dhdlt[k,n,t] is the derivative of energy component n with respect to state k of snapshot t
+    dhdlt = lambda_data["dhdlt"]  # shape (n_states, n_components, n_samples) 
 
     # Boltzmann β for T=300K in kcal/mol:
     temperature = 300.0

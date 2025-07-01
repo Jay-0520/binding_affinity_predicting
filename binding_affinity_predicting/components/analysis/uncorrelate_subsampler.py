@@ -35,16 +35,16 @@ def statistical_inefficiency(data: np.ndarray, fast: bool = False) -> float:
     if len(clean) < 10:
         logger.warning("Too few finite data points for statistical inefficiency")
         return 1.0
+    
+    # Zero variance → no correlation
+    if np.var(clean) == 0.0:
+        return 1.0
 
     try:
-        return pymbar.timeseries.statisticalInefficiency(clean, fast=fast)
+        return pymbar.timeseries.statistical_inefficiency(clean, fast=fast)
     except Exception as e:
         logger.warning(f"pymbar failed: {e}")
-        raise RuntimeError(
-            "Failed to calculate statistical inefficiency using pymbar. "
-            "Ensure pymbar is installed and data is valid."
-        ) from e
-
+        raise
 
 def subsample_correlated_data(
     data: np.ndarray, g: Optional[float] = None
@@ -68,7 +68,7 @@ def subsample_correlated_data(
         g = statistical_inefficiency(data)
 
     try:
-        return pymbar.timeseries.subsampleCorrelatedData(data, g=g)
+        return pymbar.timeseries.subsample_correlated_data(data, g=g)
     except Exception:
         step = max(1, int(g))
         return np.arange(0, len(data), step)
@@ -247,6 +247,8 @@ def perform_uncorrelating_subsampling(
         Lambda parameter values for each state and component
     start_indices, end_indices : np.ndarray, shape (num_lambda_states,)
         Analysis window boundaries for each lambda state
+    end_indices : np.ndarray, shape (num_lambda_states,)
+    
     potential_energies : np.ndarray, optional, shape (num_lambda_states, num_lambda_states,
       max_snapshots)
         Cross-evaluation potential energies (required for 'de' observable)
