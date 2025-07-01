@@ -22,6 +22,13 @@ from binding_affinity_predicting.components.analysis.utils import (
     get_lambda_components_changing,
 )
 
+# Reference results from alchemical_analysis.py for validation
+REFERENCE_RESULTS = {
+    'dhdl': [51, 27, 16, 26, 13],
+    'dhdl_all': [32, 38, 16, 26, 29],
+    'de': [22, 29, 15, 35, 13],
+}
+
 
 @pytest.fixture
 def analysis_windows(lambda_data):
@@ -148,17 +155,10 @@ def test_specific_reference_values(lambda_data, analysis_windows):
     potential_energies = lambda_data['u_klt']
     start_indices, end_indices = analysis_windows
 
-    # Test each observable with exact expected values
-    test_cases = [
-        ('dhdl', [51, 27, 16, 26, 13]),
-        ('dhdl_all', [32, 38, 16, 26, 29]),
-        ('de', [22, 29, 15, 35, 13]),
-    ]
-
-    for observable, expected_values in test_cases:
+    for observable, expected_values in REFERENCE_RESULTS.items():
         pot_energies = potential_energies if observable == 'de' else None
 
-        _, _, num_samples = perform_uncorrelating_subsampling(
+        _, _, num_uncorr_samples_per_state = perform_uncorrelating_subsampling(
             dhdl_timeseries=dhdl_timeseries,
             lambda_vectors=lambda_vectors,
             start_indices=start_indices,
@@ -168,11 +168,56 @@ def test_specific_reference_values(lambda_data, analysis_windows):
             min_uncorr_samples=2,
         )
 
-        # Exact match required for regression testing
-        actual_values = num_samples.tolist()
-        assert (
-            actual_values == expected_values
-        ), f"Regression test failed for {observable}: expected {expected_values}, got {actual_values}"  # noqa: E501
+        np.testing.assert_array_equal(
+            num_uncorr_samples_per_state,
+            np.array(expected_values),
+            err_msg=f"Results for {observable} observable don't match reference",
+        )
+
+
+def test_multi_observable_analysis(lambda_data, analysis_windows):
+    """Test multi-observable analysis function."""
+    lambda_vectors = lambda_data['lv']
+    dhdl_timeseries = lambda_data['dhdlt']
+    potential_energies = lambda_data['u_klt']
+    start_indices, end_indices = analysis_windows
+
+    observables = ['dhdl', 'dhdl_all', 'de']
+
+    results = perform_uncorrelating_subsampling_multi_observable(
+        dhdl_timeseries=dhdl_timeseries,
+        lambda_vectors=lambda_vectors,
+        start_indices=start_indices,
+        end_indices=end_indices,
+        potential_energies=potential_energies,
+        observables=observables,
+        min_uncorr_samples=2,
+    )
+
+    # Check results
+    assert len(results) == len(
+        observables
+    ), "Should have results for all requested observables"
+
+    for obs in observables:
+        assert obs in results, f"Missing results for {obs}"
+        dhdl_uncorr, potential_uncorr, num_samples = results[obs]
+
+        assert dhdl_uncorr is not None, f"dH/dλ should be available for {obs}"
+        assert len(num_samples) == len(
+            lambda_vectors
+        ), f"Sample count mismatch for {obs}"
+        assert all(
+            n > 0 for n in num_samples
+        ), f"All states should have samples for {obs}"
+
+        # Check against reference
+        expected = REFERENCE_RESULTS[obs]
+        np.testing.assert_array_equal(
+            num_samples,
+            np.array(expected),
+            err_msg=f"Multi-observable results for {obs} don't match reference",
+        )
 
 
 def test_error_handling(lambda_data, analysis_windows):
