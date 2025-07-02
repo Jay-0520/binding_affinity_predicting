@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -14,7 +14,6 @@ from binding_affinity_predicting.components.analysis.uncorrelate_subsampler impo
 from binding_affinity_predicting.components.analysis.xvg_data_loader import (
     load_alchemical_data,
 )
-from binding_affinity_predicting.components.data.enums import LegType
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
     Calculation,
     LambdaWindow,
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class FreeEnergyAnalyzer:
+class FepSimulationAnalyzer:
     """
     Dedicated class for analyzing free energy calculations from GROMACS FEP simulations.
 
@@ -65,7 +64,7 @@ class FreeEnergyAnalyzer:
         )
 
         # Storage for analysis results
-        self._analysis_results: Optional[dict] = None
+        self._analysis_results: dict[str, Any] = {}
 
     def collect_xvg_files_from_window(
         self, window: LambdaWindow, run_nos: Optional[list[int]] = None
@@ -202,18 +201,32 @@ class FreeEnergyAnalyzer:
                 )
             )
 
-            # Step 4: Estimate free energies using all methods
+            # Step 4:   Calculate ave_dhdl and std_dhdl from uncorrelated samples
+            # already beta-scaled from load_alchemical_data, so they are dimensionless
+            logger.info("Calculating dH/dλ statistics for TI methods...")
+            ave_dhdl = None
+            std_dhdl = None
+            if dhdl_uncorr is not None:
+                ave_dhdl = np.mean(dhdl_uncorr, axis=2)
+                # std_dhdl: standard error of the mean
+                # Using ddof=1 for unbiased standard deviation
+                std_dhdl = np.std(dhdl_uncorr, axis=2, ddof=1) / np.sqrt(
+                    dhdl_uncorr.shape[2]
+                )
+
+                logger.info(
+                    f"Calculated dH/dλ statistics from uncorrelated samples: "
+                    f"ave_dhdl shape={ave_dhdl.shape}, std_dhdl shape={std_dhdl.shape}"
+                )
+
+            # Step 5: Estimate free energies using all methods
             logger.info("Estimating free energies using multiple methods...")
             results = self.estimator.estimate_all_methods(
                 potential_energies=potential_uncorr,
                 sample_counts=num_uncorr_samples_per_state,
                 lambda_vectors=alchemical_data['lambda_vectors'],
-                ave_dhdl=(
-                    np.mean(dhdl_uncorr, axis=2) if dhdl_uncorr is not None else None
-                ),
-                std_dhdl=(
-                    np.std(dhdl_uncorr, axis=2) if dhdl_uncorr is not None else None
-                ),
+                ave_dhdl=ave_dhdl,
+                std_dhdl=std_dhdl,
                 methods=methods,
             )
 
@@ -283,7 +296,7 @@ class FreeEnergyAnalyzer:
         """
         logger.info("Starting comprehensive free energy analysis...")
 
-        all_results = {
+        all_results: dict[str, Any] = {
             'calculation_info': {
                 'input_dir': self.calculation.input_dir,
                 'output_dir': self.calculation.output_dir,
@@ -358,7 +371,7 @@ class FreeEnergyAnalyzer:
 
         ΔG_binding = ΔG_bound - ΔG_free
         """
-        binding_results = {
+        binding_results: dict[str, Any] = {
             'methods': {},
             'note': 'Binding free energy = ΔG_bound - ΔG_free',
             'units': self.units,
@@ -448,12 +461,12 @@ class FreeEnergyAnalyzer:
         else:
             return obj
 
-    def get_analysis_results(self) -> Optional[dict]:
+    def get_analysis_results(self) -> dict[str, Any]:
         """Get the most recent analysis results."""
         return self._analysis_results
 
     def export_analysis_summary(
-        self, output_file: Optional[Union[str, Path]] = None, format: str = "csv"
+        self, output_file: Optional[Union[str, Path]] = None
     ) -> None:
         """
         Export a summary of analysis results to a file.
@@ -477,16 +490,14 @@ class FreeEnergyAnalyzer:
                 / f"fe_analysis_summary_{timestamp}.{ext}"
             )
 
-        if format == "csv":
-            self._export_csv_summary(output_file)
-        elif format == "xlsx":
-            self._export_excel_summary(output_file)
-        else:
-            raise ValueError(f"Unsupported format: {format}")
+        self._export_csv_summary(output_file)
 
-    def _export_csv_summary(self, output_file: Path) -> None:
+    def _export_csv_summary(self, output_file: Union[str, Path]) -> None:
         """Export results summary to CSV format."""
         import csv
+
+        if isinstance(output_file, str):
+            output_file = Path(output_file)
 
         with open(output_file, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -556,7 +567,7 @@ def analyze_gromacs_calculation(
     dict
         Analysis results
     """
-    analyzer = FreeEnergyAnalyzer(calculation, temperature=temperature, units=units)
+    analyzer = FepSimulationAnalyzer(calculation, temperature=temperature, units=units)
     return analyzer.analyze_calculation(**analysis_kwargs)
 
 
@@ -583,9 +594,13 @@ def analyze_gromacs_leg(
         Analysis results
     """
     # Create a dummy calculation object for the analyzer
-    # This is a bit of a hack but allows leg-only analysis
-    analyzer = FreeEnergyAnalyzer(
-        calculation=leg.calculation if hasattr(leg, 'calculation') else None,
+    # need this to make mypy happy
+    if not hasattr(leg, 'calculation') or not isinstance(leg.calculation, Calculation):
+        raise ValueError("Leg must have a valid .calculation attribute")
+
+    # TODO: need to fix this by having leg.calculation
+    analyzer = FepSimulationAnalyzer(
+        calculation=leg.calculation,
         temperature=temperature,
         units=units,
     )

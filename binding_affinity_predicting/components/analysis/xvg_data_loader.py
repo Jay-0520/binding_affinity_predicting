@@ -13,7 +13,7 @@ methods like MBAR, BAR, and thermodynamic integration.
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import numpy as np
 
@@ -87,7 +87,7 @@ class GromacsXVGParser:
     def __init__(self):
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset parser state."""
         self.lambda_states: list[LambdaState] = []
         self.current_state: Optional[LambdaState] = None
@@ -131,7 +131,7 @@ class GromacsXVGParser:
 
         return data
 
-    def _parse_header(self, file_path: Path):
+    def _parse_header(self, file_path: Path) -> None:
         """Parse XVG header to extract lambda state and column information."""
         with open(file_path, 'r') as f:
             for line in f:
@@ -143,7 +143,7 @@ class GromacsXVGParser:
                     # Parse column legends
                     self._parse_legend(line)
 
-    def _parse_current_state(self, subtitle_line: str):
+    def _parse_current_state(self, subtitle_line: str) -> None:
         """Extract current lambda state from subtitle line."""
         # Example: @ subtitle "T = 300 (K) \\xl\\f{} state 13: (coul-lambda,
         # vdw-lambda, bonded-lambda) = (0.7500, 0.0000, 1.0000)"
@@ -164,7 +164,7 @@ class GromacsXVGParser:
                 f"check XVG file format"
             )
 
-    def _parse_legend(self, legend_line: str):
+    def _parse_legend(self, legend_line: str) -> None:
         """Parse legend lines to identify column types."""
         if ('dH/d\\xl\\f{}' in legend_line) or ('dH/dλ' in legend_line):
             # dH/dλ component
@@ -279,7 +279,7 @@ class GromacsXVGParser:
 
 
 def load_alchemical_data(
-    xvg_files: list[Union[Path, str]],
+    xvg_files: Sequence[Union[Path, str]],
     skip_time: float = 0.0,
     temperature: float = 298.15,
     reduce_to_dimensionless: bool = True,
@@ -391,6 +391,7 @@ def load_alchemical_data(
             temperature=temperature, units='kJ', software='Gromacs'
         )
         potential_energies *= beta  # Convert to dimensionless
+        dhdl_timeseries *= beta  # Convert dH/dλ to dimensionless
     else:
         logger.warning(
             "Potential energies will not be reduced to dimensionless values. "

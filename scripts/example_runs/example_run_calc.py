@@ -1,5 +1,8 @@
 import time
 
+from binding_affinity_predicting.components.analysis.simulation_analyzer import (
+    analyze_gromacs_calculation,
+)
 from binding_affinity_predicting.components.data.enums import LegType
 from binding_affinity_predicting.components.data.schemas import (
     GromacsFepSimulationConfig,
@@ -73,4 +76,11 @@ while True:
 
     time.sleep(30)  # wait 30 s before checking again
 
+
+# run analysis on the first leg of the calculation
+# results = analyze_gromacs_leg(
+#     leg=calc.legs[0])
+results = analyze_gromacs_calculation(
+    calculation=calc,
+)
 print("All done!")

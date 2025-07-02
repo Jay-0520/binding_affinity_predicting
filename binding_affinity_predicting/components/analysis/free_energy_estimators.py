@@ -1328,7 +1328,6 @@ class MultistateBAR:
                     'free_energy_errors_all': free_energy_errors,
                     'Deltaf_ij': Deltaf_ij / beta_report,
                     'dDeltaf_ij': dDeltaf_ij / beta_report,
-                    'mbar_object': mbar_object,
                     'n_states': len(num_samples_per_state),
                     'units': unit_string,
                     'temperature': temperature,
