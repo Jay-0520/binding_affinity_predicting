@@ -38,7 +38,7 @@ class Simulation:
         extra_params: Optional[dict[str, Any]] = None,
         mdp_generator: Optional[MDPGenerator] = None,
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
-        runtime_ns: Optional[float] = None,
+        # runtime_ns: Optional[float] = None,
         mdp_overrides: Optional[dict[str, Union[str, int, float]]] = None,
     ) -> None:
         """
@@ -88,7 +88,7 @@ class Simulation:
         self.coul_list = list(coul_list)
         self.vdw_list = list(vdw_list)
         self.extra_params = extra_params or {}
-        self.runtime_ns = runtime_ns
+        # self.runtime_ns = runtime_ns
         self.mdp_overrides = mdp_overrides or {}
 
         # Initialize Pydantic-based generators
@@ -188,7 +188,6 @@ class Simulation:
                 bonded_lambdas=self.bonded_list,
                 coul_lambdas=self.coul_list,
                 vdw_lambdas=self.vdw_list,
-                runtime_ns=self.runtime_ns,
                 custom_overrides=self.mdp_overrides,
             )
             self.setup_time = datetime.now()
@@ -264,18 +263,35 @@ class Simulation:
             logger.error(f"Failed to generate submit script: {e}")
             raise
 
-    def run(self) -> None:
+    def run(self, runtime: Optional[float] = None) -> None:
         """
         Run the simulation locally (blocking).
         """
         self.job_status = JobStatus.RUNNING
         self.start_time = datetime.now()
         self._running = True  # Set running to True at startz
-
         # 1. Setup if not already done
-        if not hasattr(self, "mdp_file"):
-            logger.warning("Must setup system first before running simulation...")
+        # Check if we need to regenerate MDP due to only runtime changes
+        mdp_file_exists = Path(self.mdp_file).exists()
+        if not mdp_file_exists:
+            # First time - need to setup
+            logger.info(f"Setting up simulation for λ={self.lam_state} (first time)")
             self.setup()
+        elif runtime is not None:
+            # File exists but have new runtime - regenerate
+            logger.info(
+                f"👍 Regenerating MDP file for λ={self.lam_state} with runtime {runtime} ns"
+            )
+            self.mdp_generator.write_mdp_file(
+                output_path=self.mdp_file,
+                lambda_state=self.lam_state,
+                bonded_lambdas=self.bonded_list,
+                coul_lambdas=self.coul_list,
+                vdw_lambdas=self.vdw_list,
+                runtime_ns=runtime,  # ← Use updated runtime
+                # we must omit custom_overrides here
+            )
+            self.setup_time = datetime.now()
 
         # 2. gmx grompp
         logger.info(f"Preparing tpr for lambda {self.lam_state} in {self.work_dir}")

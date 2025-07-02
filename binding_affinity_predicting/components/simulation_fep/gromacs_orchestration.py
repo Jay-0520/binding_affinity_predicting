@@ -86,7 +86,6 @@ class LambdaWindow(SimulationRunner):
         """Create default MDP generator with parameters from sim_params."""
         # Extract MDP-specific parameters from sim_params
         mdp_overrides = self.sim_params.get("mdp_overrides", {})
-
         # Create generator with any custom MDP parameters
         return create_custom_mdp_generator(**mdp_overrides)
 
@@ -94,7 +93,6 @@ class LambdaWindow(SimulationRunner):
         """Create default SLURM generator with parameters from sim_params."""
         # Extract SLURM-specific parameters from sim_params
         slurm_overrides = self.sim_params.get("slurm_overrides", {})
-
         # Create generator with any custom SLURM parameters
         return create_custom_slurm_generator(**slurm_overrides)
 
@@ -126,7 +124,7 @@ class LambdaWindow(SimulationRunner):
                 extra_params=self.sim_params.get("extra_params", {}),
                 mdp_generator=self.mdp_generator,
                 slurm_generator=self.slurm_generator,
-                runtime_ns=self.sim_params.get("runtime_ns"),
+                # runtime_ns=self.sim_params.get("runtime_ns"),  # this is from sim_config
                 mdp_overrides=self.sim_params.get("mdp_overrides", {}),
             )
             # Set up the simulation's MDP file immediately
@@ -218,11 +216,7 @@ class LambdaWindow(SimulationRunner):
                     f"Invalid run number {run_no}. Must be in [1..{self.ensemble_size}]."
                 )
             sim_index = run_no - 1
-            # Pass runtime to individual simulation
-            if runtime is not None:
-                self._sub_sim_runners[sim_index].runtime_ns = runtime
-
-            self._sub_sim_runners[sim_index].run()
+            self._sub_sim_runners[sim_index].run(runtime=runtime)
 
         # Update status based on simulation results
         self._update_status()
@@ -573,7 +567,7 @@ class Leg(SimulationRunner):
         if leg_base.exists():
             shutil.copytree(leg_base, backup_base)
             self._backup_path = backup_base
-            logger.info("✅ Backup created successfully")
+            logger.info("Backup created successfully")
         else:
             raise RuntimeError(f"Cannot backup non-existent directory: {leg_base}")
 
@@ -607,7 +601,7 @@ class Leg(SimulationRunner):
         # Restore from backup
         shutil.copytree(self._backup_path, leg_base)
 
-        logger.info("✅ Restored from backup successfully")
+        logger.info("Restored from backup successfully")
 
     def cleanup_backup(self) -> None:
         """
@@ -617,7 +611,7 @@ class Leg(SimulationRunner):
             logger.info(f"Cleaning up backup: {self._backup_path}")
             shutil.rmtree(self._backup_path)
             self._backup_path = None
-            logger.info("✅ Backup cleaned up")
+            logger.info("Backup cleaned up")
 
     @property
     def has_backup(self) -> bool:
@@ -653,12 +647,37 @@ class Calculation(SimulationRunner):
         output_dir: str,
         sim_config: GromacsFepSimulationConfig,
         equil_detection: str = "multiwindow",
-        runtime_constant: Optional[float] = 0.001,
         ensemble_size: int = 5,
         virtual_queue: Optional[VirtualQueue] = None,
         mdp_generator: Optional[MDPGenerator] = None,
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
     ) -> None:
+        """
+
+        Parameters
+        ----------
+        input_dir : str
+            Directory containing input files for the calculation.
+        output_dir : str
+            Directory where output files will be stored.
+        sim_config : GromacsFepSimulationConfig
+            Configuration object containing simulation parameters.
+        equil_detection : str, default: "multiwindow"
+            Method for detecting equilibration. Options: "multiwindow", "singlewindow".
+        runtime_ns : float, optional, default: 0.001 (ns)
+            Constant runtime for each lambda window. If None, uses sim_config.runtime_ns.
+            when this is provided, it will override the MDP file's `nsteps` parameter.
+            This is useful for testing purposes and for lambda optimization.
+        ensemble_size : int, default: 5
+            Number of replicas to run for each lambda window.
+        virtual_queue : VirtualQueue, optional
+            Virtual queue for managing HPC job submissions. If None, a new one is created.
+        mdp_generator : MDPGenerator, optional
+            Custom MDP generator for creating MDP files. If None, uses defaults from sim_config.
+        slurm_generator : SlurmSubmitGenerator, optional
+            Custom SLURM generator for creating submit scripts. If None, uses
+            defaults from sim_config.
+        """
         # Set up virtual queue if not provided
         if virtual_queue is None:
             virtual_queue = VirtualQueue(log_dir=output_dir)
@@ -671,7 +690,7 @@ class Calculation(SimulationRunner):
         )
         self.sim_config = sim_config
         self.equil_detection = equil_detection
-        self.runtime_constant = runtime_constant
+        # self.runtime_ns = runtime_ns
 
         # Initialize Pydantic-based generators at the calculation level
         self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
@@ -727,7 +746,7 @@ class Calculation(SimulationRunner):
     def run(
         self,
         run_nos: Optional[list[int]] = None,
-        runtime: Optional[float] = None,
+        runtime: Optional[float] = None,  # ns
         use_hpc: bool = True,
         run_sync: bool = True,
     ) -> Optional[threading.Thread]:
@@ -740,7 +759,6 @@ class Calculation(SimulationRunner):
         ----------
         run_nos : List[int] or None
             If provided, only run those replica indices (1-based) for each lambda.
-        runtime : float, Optional, default: None (ns)
         use_hpc : bool
             If True, submit all windows` `submit_gmx.sh` to SLURM (nonblocking).
             If False, run everything locally (blocking).

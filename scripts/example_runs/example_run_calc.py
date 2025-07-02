@@ -32,6 +32,9 @@ custom_sim_config = GromacsFepSimulationConfig(
     bonded_lambdas=custom_bonded,
     coul_lambdas=custom_coul,
     vdw_lambdas=custom_vdw,
+    mdp_overrides={  # we can override default MDP parameters here
+        "nsteps": 1_000,
+    },
 )
 
 calc = Calculation(
@@ -44,7 +47,11 @@ calc = Calculation(
 test_runtime = 0.002  # ns
 
 calc.setup()
-calc.run(runtime=test_runtime, use_hpc=False, run_sync=False)
+calc.run(
+    runtime=test_runtime,  # we can override MDP runtime parameters here
+    use_hpc=False,
+    run_sync=False,
+)
 
 # monitor and check calculation progress
 monitor = StatusMonitor(calc)
