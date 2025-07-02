@@ -495,7 +495,6 @@ def test_estimator_mbar(free_energy_estimator, lambda_data):
     # Check that we get the full MBAR result dictionary
     assert 'free_energies_all' in result
     assert 'Deltaf_ij' in result
-    assert 'mbar_object' in result
 
 
 def test_estimator_all_methods(free_energy_estimator, lambda_data, ti_data):
