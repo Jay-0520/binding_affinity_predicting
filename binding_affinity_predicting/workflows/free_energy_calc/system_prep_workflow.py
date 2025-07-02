@@ -5,22 +5,24 @@ from typing import Optional, Union
 
 import BioSimSpace.Sandpit.Exscientia as BSS  # type: ignore[import]
 
-from binding_affinity_predicting.data.enums import LegType, PreparationStage
-from binding_affinity_predicting.data.schemas import BaseWorkflowConfig
-from binding_affinity_predicting.hpc_cluster.slurm import run_slurm
-from binding_affinity_predicting.simulation.parameterise import parameterise_system
-from binding_affinity_predicting.simulation.preequilibration import (
+from binding_affinity_predicting.components.data.enums import LegType, PreparationStage
+from binding_affinity_predicting.components.data.schemas import BaseWorkflowConfig
+from binding_affinity_predicting.components.simulation_base.parameterise import (
+    parameterise_system,
+)
+from binding_affinity_predicting.components.simulation_base.preequilibration import (
     energy_minimise_system,
     preequilibrate_system,
     run_ensemble_equilibration,
 )
-from binding_affinity_predicting.simulation.system_preparation import (
+from binding_affinity_predicting.components.simulation_base.system_preparation import (
     extract_restraint_from_traj,
     solvate_system,
 )
-from binding_affinity_predicting.simulation.utils import (
+from binding_affinity_predicting.components.simulation_base.utils import (
     load_system_from_source,
 )
+from binding_affinity_predicting.components.supercluster.slurm import run_slurm
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -261,25 +263,6 @@ def _prepare_restraints_from_ensemble_equilibration(
     return restraint_list
 
 
-# def _move_and_create_files(input_dir: str, output_dir: str, filename_stem: str):
-#     """
-#     Move files to the correct location and create any necessary files.
-
-#     Parameters
-#     ----------
-#     input_dir : str
-#         Directory where the equilibration files are located.
-#     output_dir : str
-#         Directory where the files should be moved to.
-#     """
-#     output_bound_dir = Path(output_dir) / "bound"
-#     output_bound_dir.mkdir(parents=True, exist_ok=True)
-#     for dir_name in ["discharge", "restrain", "vanish"]:
-#         os.makedirs(Path(output_bound_dir) / dir_name, exist_ok=True)
-
-#         move_link_and_create_files()
-
-
 def run_complete_system_setup_bound_and_free(
     *,
     protein_path: Optional[str] = None,
@@ -308,7 +291,3 @@ def run_complete_system_setup_bound_and_free(
         filename_stem=filename_stem,
         work_dir=output_dir,
     )
-
-
-def prepare_fep_simulation_systems():
-    pass

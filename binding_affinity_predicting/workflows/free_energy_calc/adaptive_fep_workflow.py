@@ -1,13 +1,17 @@
 import logging
 from typing import Optional
 
-from binding_affinity_predicting.components.gromacs_orchestration import Calculation
-from binding_affinity_predicting.components.lambda_optimizer import (
+from binding_affinity_predicting.components.data.schemas import (
+    GromacsFepSimulationConfig,
+)
+from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
+    Calculation,
+)
+from binding_affinity_predicting.components.simulation_fep.lambda_optimizer import (
     LambdaOptimizationManager,
     OptimizationConfig,
     OptimizationResult,
 )
-from binding_affinity_predicting.data.schemas import GromacsFepSimulationConfig
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -29,6 +33,37 @@ def run_calculation_with_lambda_optimization(
 ) -> tuple[Calculation, dict[str, OptimizationResult]]:
     """
     Workflow with proper runtime management for optimization
+
+    Parameters:
+    -----------
+    custom_sim_config : GromacsFepSimulationConfig
+        Custom simulation configuration with lambda windows and MDP overrides
+    input_dir : str
+        Directory containing input files for the calculation
+    output_dir : str
+        Directory where output files will be saved
+    ensemble_size : int
+        Number of ensemble members to run in parallel
+    run_nos : Optional[list[int]]
+        Specific run numbers to optimize; if None, optimizes all runs
+    equilibrated : bool
+        Whether the initial simulation is equilibrated
+    apply_optimization : bool
+        Whether to apply the optimized lambda spacing after collection
+    gradient_collection_runtime : float
+        Runtime for the initial gradient collection simulation (in ns)
+    optimized_runtime : float
+        Runtime for the optimized production simulation (in ns)
+    use_hpc : bool
+        Whether to run the calculation on an HPC cluster
+    run_sync : bool
+        Whether to run the calculation synchronously (blocking) or asynchronously
+
+    Returns:
+    --------
+    tuple[Calculation, dict[str, OptimizationResult]]
+        The Calculation object containing the simulation results and the optimization results
+        for each run number
     """
 
     logger.info("=" * 60)
@@ -42,7 +77,7 @@ def run_calculation_with_lambda_optimization(
         sim_config=custom_sim_config,
     )
     calc.setup()
-    logger.info(f"✅ Calculation set up with {len(calc.legs)} legs")
+    logger.info(f"Calculation set up with {len(calc.legs)} legs")
 
     logger.info(
         f"Step 2: Running SHORT simulation for gradient collection ({gradient_collection_runtime} ns)..."  # noqa: E501
@@ -57,7 +92,7 @@ def run_calculation_with_lambda_optimization(
         logger.info("Waiting for gradient collection to complete...")
         _wait_for_calculation_completion(calc)
 
-    logger.info("✅ Gradient collection completed")
+    logger.info("Gradient collection completed")
     logger.info("Step 3: Optimizing lambda spacing...")
 
     manager = LambdaOptimizationManager(config=OptimizationConfig())
@@ -94,7 +129,7 @@ def run_calculation_with_lambda_optimization(
             logger.info("Waiting for optimized simulation to complete...")
             _wait_for_calculation_completion(calc)
 
-        logger.info("✅ Optimized simulation completed")
+        logger.info("Optimized simulation completed")
     else:
         logger.info(
             "Step 4: Skipping optimized simulation (no successful optimization)"
