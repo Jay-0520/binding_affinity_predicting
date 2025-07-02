@@ -13,9 +13,9 @@ import pytest
 from binding_affinity_predicting.components.analysis.uncorrelate_subsampler import (
     _construct_observable_series,
     _find_last_repeated_lambda_state,
+    calc_statistical_inefficiency,
     perform_uncorrelating_subsampling,
     perform_uncorrelating_subsampling_multi_observable,
-    statistical_inefficiency,
     subsample_correlated_data,
 )
 from binding_affinity_predicting.components.analysis.utils import (
@@ -43,11 +43,11 @@ def analysis_windows(lambda_data):
     return start_indices, end_indices
 
 
-def test_statistical_inefficiency_basic():
+def test_calc_statistical_inefficiency_basic():
     """Test statistical inefficiency calculation with synthetic data."""
     # Test with uncorrelated data
     uncorr_data = np.random.normal(0, 1, 1000)
-    g_uncorr = statistical_inefficiency(uncorr_data)
+    g_uncorr = calc_statistical_inefficiency(uncorr_data)
     assert 0.5 < g_uncorr < 2.0, f"Uncorrelated data should have g~1, got {g_uncorr}"
 
     # Test with correlated data (AR(1) process)
@@ -57,16 +57,16 @@ def test_statistical_inefficiency_basic():
     for i in range(1, 1000):
         corr_data[i] = phi * corr_data[i - 1] + np.sqrt(1 - phi**2) * np.random.normal()
 
-    g_corr = statistical_inefficiency(corr_data)
+    g_corr = calc_statistical_inefficiency(corr_data)
     assert g_corr > 5.0, f"Correlated data should have g>5, got {g_corr}"
 
     # Test edge cases
     short_data = np.array([1, 2, 3])
-    g_short = statistical_inefficiency(short_data)
+    g_short = calc_statistical_inefficiency(short_data)
     assert g_short == 1.0, "Short data should return g=1"
 
     zeros_data = np.zeros(100)
-    g_zeros = statistical_inefficiency(zeros_data)
+    g_zeros = calc_statistical_inefficiency(zeros_data)
     assert g_zeros == 1.0, "Zero variance data should return g=1"
 
 
