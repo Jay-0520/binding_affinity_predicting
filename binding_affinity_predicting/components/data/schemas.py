@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -120,6 +120,7 @@ class EnergyMinimisationConfig(BaseModel):
         validate_assignment = True
 
 
+# TODO: ensure all parameters in gromacs_orchestration.py are present here
 class GromacsFepSimulationConfig(BaseModel):
     """
     For each leg (BOUND or FREE), specify three parallel lambda schedules:
@@ -132,162 +133,59 @@ class GromacsFepSimulationConfig(BaseModel):
     supply a “dummy” bonded vector of the same length, for consistency.
     """
 
+    # fmt: off
     bonded_lambdas: dict[LegType, list[float]] = Field(
         default_factory=lambda: {
-            LegType.BOUND: [
-                0.0,
-                0.01,
-                0.025,
-                0.05,
-                0.075,
-                0.1,
-                0.2,
-                0.35,
-                0.5,
-                0.75,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-            ],
+           LegType.BOUND: [0.0, 0.01, 0.025, 0.05, 0.075, 0.1, 0.2, 0.35, 0.5,  # noqa: E127,E128,E131,E122,E501
+                             0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,      # noqa: E127,E128,E131,E122,E501
+                             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,       # noqa: E127,E128,E131,E122,E501
+                             1.0, 1.0, 1.0]  # noqa: E127,E128,E131,E122, E501
         },
         description="Only LegType.BOUND is allowed here; FREE is omitted entirely.",
     )
 
     coul_lambdas: dict[LegType, list[float]] = Field(
         default_factory=lambda: {
-            LegType.BOUND: [
-                0.0,
-                0.00,
-                0.000,
-                0.00,
-                0.000,
-                0.0,
-                0.0,
-                0.00,
-                0.0,
-                0.00,
-                0.0,
-                0.25,
-                0.5,
-                0.75,
-                1.0,
-                1.00,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-            ],
-            LegType.FREE: [
-                0.0,
-                0.25,
-                0.5,
-                0.75,
-                1.0,
-                1.00,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-                1.00,
-                1.0,
-            ],
+                        LegType.BOUND: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  # noqa: E127,E128,E131,E122, E501
+                             0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,  # noqa: E127,E128,E131,E122, E501
+                             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],   # noqa: E127,E128,E131,E122, E501
+            LegType.FREE:  [0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,   # noqa: E127,E128,E131,E122, E501
+                            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],    # noqa: E127,E128,E131,E122, E501
         }
     )
-
     vdw_lambdas: dict[LegType, list[float]] = (
         Field(
             default_factory=lambda: {
-                LegType.BOUND: [
-                    0.0,
-                    0.00,
-                    0.000,
-                    0.00,
-                    0.000,
-                    0.0,
-                    0.0,
-                    0.00,
-                    0.0,
-                    0.00,
-                    0.0,
-                    0.00,
-                    0.0,
-                    0.00,
-                    0.0,
-                    0.05,
-                    0.1,
-                    0.2,
-                    0.3,
-                    0.4,
-                    0.5,
-                    0.6,
-                    0.65,
-                    0.7,
-                    0.75,
-                    0.8,
-                    0.85,
-                    0.9,
-                    0.95,
-                    1.0,
-                ],
-                LegType.FREE: [
-                    0.0,
-                    0.00,
-                    0.0,
-                    0.00,
-                    0.0,
-                    0.05,
-                    0.1,
-                    0.2,
-                    0.3,
-                    0.4,
-                    0.5,
-                    0.6,
-                    0.65,
-                    0.7,
-                    0.75,
-                    0.8,
-                    0.85,
-                    0.9,
-                    0.95,
-                    1.0,
-                ],
+                           LegType.BOUND: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  # noqa: E127,E128,E131,E122, E501
+                             0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.2, 0.3, 0.4,   # noqa: E127,E128,E131,E122, E501
+                             0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0],  # noqa: E127,E128,E131,E122, E501
+            LegType.FREE:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.2, 0.3, 0.4,   # noqa: E127,E128,E131,E122, E501
+                            0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0],   # noqa: E127,E128,E131,E122, E501
             }
-        ),
+        )
+    )
+    # fmt: on
+    mdp_overrides: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Dictionary of MDP parameters to override (e.g., "
+        "{'nsteps': 50000, 'dt': 0.002})",
+    )
+    slurm_overrides: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Dictionary of SLURM parameters to override (e.g., "
+        "{'ntasks': 8, 'time': '24:00:00'})",
+    )
+    modules_to_load: list[str] = Field(
+        default_factory=list,
+        description="List of environment modules to load before running GROMACS",
+    )
+    pre_commands: list[str] = Field(
+        default_factory=list,
+        description="List of shell commands to execute before running GROMACS",
+    )
+    post_commands: list[str] = Field(
+        default_factory=list,
+        description="List of shell commands to execute after running GROMACS",
     )
 
     @model_validator(mode="after")

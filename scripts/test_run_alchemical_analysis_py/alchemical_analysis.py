@@ -448,6 +448,9 @@ def uncorrelate(sta, fin, do_dhdl=False):
     """Identifies uncorrelated samples and updates the arrays of the reduced potential energy and dhdlt retaining data entries of these samples only.
     'sta' and 'fin' are the starting and final snapshot positions to be read, both are arrays of dimension K.
     """
+    print(f"🔍 uncorrelate called: K={K}, sta={sta}, fin={fin}, do_dhdl={do_dhdl}")
+    print(f"🔍 nsnapshots = {fin}")
+    print(f"🔍 P.uncorr_threshold = {P.uncorr_threshold}")
     if not P.uncorr_threshold:
         if P.software.title() == 'Sire':
             return dhdlt, nsnapshots, None
@@ -550,12 +553,20 @@ def uncorrelate(sta, fin, do_dhdl=False):
                 for l in range(K):
                     u_kln[k, l, 0:N] = u_klt[k, l, indices]
             if do_dhdl:
-                print("%6s %12s %12s %12.2f") % (k, fin[k], N_k[k], g[k])
+                # print("%6s %12s %12s %12.2f") % (k, fin[k], N_k[k], g[k])
+                print(f"{k:6d} {fin[k]:12d} {N_k[k]:12d} {g[k]:12.2f}")
                 for n in range(n_components):
                     dhdl[k, n, 0:N] = dhdlt[k, n, indices]
 
     if UNCORR_OBSERVABLE == 'dE':
+        print(f"🔍🔍🔍 Using dE observable")
         # Uncorrelate based on energy differences between lambdas.
+        import numpy as np
+
+        print(f"u_klt is None: {u_klt is None}")
+        if u_klt is not None:
+            print(f"u_klt shape: {u_klt.shape}")
+            print(f"u_klt has data: {np.any(u_klt)}")
 
         for k in range(K):
             # Sum up over the energy components as above using only the relevant data; here we use energy differences
@@ -566,6 +577,14 @@ def uncorrelate(sta, fin, do_dhdl=False):
                 if not k == K - 1
                 else u_klt[k, k - 1, sta[k] : fin[k]]
             )
+
+            print(f"🔍 State {k}: dE shape = {dE.shape}")
+            print(f"🔍 State {k}: dE has data = {numpy.any(dE)}")
+            print(
+                f"🔍 State {k}: dE stats = min:{dE.min():.3f}, max:{dE.max():.3f}, std:{dE.std():.3f}"
+            )
+            if not numpy.any(dE):
+                print(f"🔍 State {k}: dE is all zeros!")
 
             g[k] = pymbar.timeseries.statisticalInefficiency(dE)
             indices = sta[k] + numpy.array(
@@ -583,6 +602,9 @@ def uncorrelate(sta, fin, do_dhdl=False):
             if not (u_klt is None):
                 for l in range(K):
                     u_kln[k, l, 0:N] = u_klt[k, l, indices]
+                    # ADD THIS PRINT STATEMENT:
+            if True:  # This should probably just be True for dE
+                print("-----%6s %12s %12s %12.2f" % (k, len(indices), N_k[k], g[k]))
 
     if do_dhdl:
         return (dhdl, N_k, u_kln)
@@ -704,9 +726,10 @@ def estimatewithMBAR(u_kln, N_k, reltol, regular_estimate=False):
         uncertainty_method='svd-ew', return_theta=True
     )
     if P.verbose:
-        print("Matrix of free energy differences\nDeltaf_ij:\n%s\ndDeltaf_ij:\n%s") % (
-            Deltaf_ij,
-            dDeltaf_ij,
+        print(
+            f"Matrix of free energy differences\n"
+            f"Deltaf_ij:\n{Deltaf_ij}\n"
+            f"dDeltaf_ij:\n{dDeltaf_ij}"
         )
     if regular_estimate:
         if P.overlap:
@@ -1715,6 +1738,7 @@ def plotdFvsLambda():
                         z.append(j)
                         return getInd(ri[j:], z)
 
+        print("K ====", K)
         xt = [i if (i in getInd()) else '' for i in range(K)]
         pl.xticks(xs[1:], xt[1:], fontsize=10)
         pl.yticks(fontsize=10)
@@ -1985,6 +2009,7 @@ def main():
         import parser_gromacs
 
         nsnapshots, lv, dhdlt, u_klt = parser_gromacs.readDataGromacs(P)
+        print('u_klt', u_klt, u_klt.shape)
     elif P.software.title() == 'Sire':
         import parser_sire
 
@@ -2032,6 +2057,12 @@ def main():
         sys.exit("Exiting...")
 
     if (numpy.array(['Sire', 'Gromacs', 'Amber']) == P.software.title()).any():
+        print(f"🔍 P.uncorr = {P.uncorr}")
+        print(f"🔍 P.uncorr_threshold = {P.uncorr_threshold}")
+        print(
+            f"🔍 About to call uncorrelate with sta={numpy.zeros(K, int)}, fin={nsnapshots}"
+        )
+
         dhdl, N_k, u_kln = uncorrelate(
             sta=numpy.zeros(K, int), fin=nsnapshots, do_dhdl=True
         )
@@ -2070,26 +2101,26 @@ def main():
 
 
 if __name__ == "__main__":
-    # import parser_gromacs
-    # import pickle
+    #  import parser_gromacs
+    #  import pickle
     main()
-    # P = parser.parse_args()[0]
-    # P.units, P.beta, P.beta_report = checkUnitsAndMore(P.units)
-    # nsnapshots, lv, dhdlt, u_klt = parser_gromacs.readDataGromacs(P)
-    # print("nsnapshots:", nsnapshots)
-    # print("lv:", lv)
-    # print("dhdlt:", dhdlt)
-    # print("u_klt:", u_klt)
+    #  P = parser.parse_args()[0]
+    #  P.units, P.beta, P.beta_report = checkUnitsAndMore(P.units)
+    #  nsnapshots, lv, dhdlt, u_klt = parser_gromacs.readDataGromacs(P)
+    #  print("nsnapshots:", nsnapshots)
+    #  print("lv:", lv)
+    #  print("dhdlt:", dhdlt)
+    #  print("u_klt:", u_klt)
 
-    # out = {
-    #    "nsnapshots": nsnapshots,
-    #    "lv"         : lv,
-    #    "dhdlt"      : dhdlt,
-    #    "u_klt"      : u_klt
-    # }
+    #  out = {
+    #     "nsnapshots": nsnapshots,
+    #     "lv"         : lv,
+    #     "dhdlt"      : dhdlt,
+    #     "u_klt"      : u_klt
+    #  }
 
-    # with open("fep_data.pkl", "wb") as f:
-    #    pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
+    #  with open("lambda_data.pkl", "wb") as f:
+    #     pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # print("Saved to fep_data.pkl")
 

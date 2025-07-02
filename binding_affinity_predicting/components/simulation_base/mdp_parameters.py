@@ -5,10 +5,14 @@ This module provides Python classes to generate MDP files and SLURM submit scrip
 programmatically, replacing the need for template files.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class MDPParameters(BaseModel):
@@ -306,7 +310,11 @@ class MDPGenerator:
 
         # Calculate nsteps if runtime is provided
         if runtime_ns is not None:
+            # convert runtime to ps because GROMACS uses ps for nsteps
             params.nsteps = int(runtime_ns * 1000 / params.dt)
+            logger.info(
+                f'Overriding MDP nsteps to {params.nsteps} based on runtime: {runtime_ns} ns'
+            )
 
         # Apply custom overrides
         if custom_overrides:
@@ -462,10 +470,13 @@ class MDPGenerator:
         vdw_lambdas : List[float]
             van der Waals lambda values
         runtime_ns : float, optional
-            Runtime in nanoseconds
+            Runtime in nanoseconds (ns)
         custom_overrides : Dict, optional
             Custom parameter overrides
         """
+        logger.info(
+            f"Writing MDP file for lambda state {lambda_state} to {output_path}"
+        )
         content = self.generate_mdp_content(
             lambda_state=lambda_state,
             bonded_lambdas=bonded_lambdas,
