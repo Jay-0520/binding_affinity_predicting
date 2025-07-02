@@ -22,14 +22,14 @@ You should have received a copy of the GNU Lesser General Public
 License along with this software. If not, see <http://www.gnu.org/licenses/>.
 """
 
-__all__ = ["get_statistical_inefficiency"]
+__all__ = ["_statistical_inefficiency_chodera"]
 
 from typing import Optional
 
 import numpy as np
 
 
-def get_statistical_inefficiency(
+def _statistical_inefficiency_chodera(
     A_n: np.ndarray,
     B_n: Optional[np.ndarray] = None,
     fast: bool = False,

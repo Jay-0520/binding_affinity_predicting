@@ -4,6 +4,9 @@ from typing import Optional, Tuple
 import numpy as np
 import pymbar
 
+from binding_affinity_predicting.components.analysis.autocorrelation import (
+    _statistical_inefficiency_chodera,
+)
 from binding_affinity_predicting.components.analysis.utils import (
     get_lambda_components_changing,
 )
@@ -12,9 +15,19 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def statistical_inefficiency(data: np.ndarray, fast: bool = False) -> float:
+def calc_statistical_inefficiency(
+    data: np.ndarray,
+    fast: bool = False,
+    method: str = "pymbar",
+    preprocessing: Optional[str] = None,
+) -> float:
     """
     Calculate statistical inefficiency (correlation time) using pymbar.
+
+    g = 1 -> PERFECT independence - each data point is completely uncorrelated
+    g > 1 -> data points are correlated, g is the correlation time
+        - g = 5 -> Only 1 in 5 data points is truly independent
+        - g = 20 -> Only 1 in 20 data points is truly independent
 
     Parameters:
     -----------
@@ -28,23 +41,99 @@ def statistical_inefficiency(data: np.ndarray, fast: bool = False) -> float:
     float
         Statistical inefficiency (correlation time)
     """
+    if len(data) == 0:
+        raise ValueError("Cannot calculate statistical inefficiency for empty data")
+
     if len(data) < 10:
         return 1.0
 
-    clean = data[np.isfinite(data)]
-    if len(clean) < 10:
+    clean_data = data[np.isfinite(data)]
+    if len(clean_data) < 10:
         logger.warning("Too few finite data points for statistical inefficiency")
         return 1.0
 
+    # Apply preprocessing
+    if preprocessing is not None:
+        clean_data = _preprocess_timeseries(
+            data=clean_data, preprocessing=preprocessing
+        )
+
     # Zero variance → no correlation
-    if np.var(clean) == 0.0:
+    if np.var(clean_data) == 0.0:
         return 1.0
 
     try:
-        return pymbar.timeseries.statistical_inefficiency(clean, fast=fast)
+        if method == "pymbar":
+            return float(
+                pymbar.timeseries.statistical_inefficiency(clean_data, fast=fast)
+            )
+        elif method == "chodera":
+            return _statistical_inefficiency_chodera(clean_data, fast=fast)
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
     except Exception as e:
-        logger.warning(f"pymbar failed: {e}")
+        logger.warning(
+            f"Statistical inefficiency calculation failed with {method}: {e}"
+        )
         raise
+
+
+# TODO: need to implement this function properly
+def _preprocess_timeseries(data: np.ndarray, preprocessing: str) -> np.ndarray:
+    """
+    Most autocorrelation routines (e.g. in pymbar or algorithms from Chodera’s lab)
+    assume time series is stationary: its mean and variance stay roughly constant over time
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input time series data
+    preprocessing : str
+        Preprocessing method to apply
+
+    Returns
+    -------
+    np.ndarray
+        Preprocessed data
+    """
+    if preprocessing == "none":
+        return data.copy()
+
+    elif preprocessing == "center":
+        # Center data (subtract mean)
+        return data - np.mean(data)
+
+    elif preprocessing == "standardize":
+        # Standardize data (zero mean, unit variance)
+        mean_val = np.mean(data)
+        std_val = np.std(data, ddof=1)
+        if std_val == 0:
+            logger.warning("Cannot standardize data with zero variance")
+            return data - mean_val
+        return (data - mean_val) / std_val
+
+    elif preprocessing == "detrend":
+        # Remove linear trend
+        x = np.arange(len(data))
+        # Simple linear regression
+        slope = np.cov(x, data)[0, 1] / np.var(x)
+        intercept = np.mean(data) - slope * np.mean(x)
+        trend = slope * x + intercept
+        return data - trend
+
+    elif preprocessing == "diff":
+        # Use first differences
+        if len(data) < 2:
+            logger.warning("Cannot compute differences for data with < 2 points")
+            return data
+        return np.diff(data)
+
+    else:
+        raise ValueError(
+            f"Unknown preprocessing method: {preprocessing}. "
+            f"Use 'none', 'center', 'standardize', 'detrend', or 'diff'"
+        )
 
 
 def subsample_correlated_data(
@@ -66,7 +155,7 @@ def subsample_correlated_data(
         Indices of uncorrelated samples
     """
     if g is None:
-        g = statistical_inefficiency(data)
+        g = calc_statistical_inefficiency(data)
 
     try:
         return pymbar.timeseries.subsample_correlated_data(data, g=g)
@@ -338,7 +427,7 @@ def perform_uncorrelating_subsampling(
                     f"WARNING: No fluctuations detected for lambda state {lambda_state_idx}, setting g=1"  # noqa: E501
                 )
             else:
-                correlation_times[lambda_state_idx] = statistical_inefficiency(
+                correlation_times[lambda_state_idx] = calc_statistical_inefficiency(
                     observable_series, fast=fast_analysis
                 )
 
