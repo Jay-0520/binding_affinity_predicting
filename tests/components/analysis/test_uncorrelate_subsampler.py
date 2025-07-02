@@ -13,6 +13,7 @@ import pytest
 from binding_affinity_predicting.components.analysis.uncorrelate_subsampler import (
     _construct_observable_series,
     _find_last_repeated_lambda_state,
+    _preprocess_timeseries,
     calc_statistical_inefficiency,
     perform_uncorrelating_subsampling,
     perform_uncorrelating_subsampling_multi_observable,
@@ -69,25 +70,6 @@ def correlated_data():
     return data, theoretical_g
 
 
-@pytest.fixture
-def problematic_data():
-    """Generate data with common MD simulation problems."""
-    np.random.seed(42)
-    n = 1000
-
-    # Base stationary data
-    base = np.random.normal(0, 1, n)
-
-    return {
-        'with_trend': base + 0.01 * np.arange(n),  # Linear trend
-        'with_offset': base + 10.0,  # Large constant offset
-        'with_drift': base + np.cumsum(np.random.normal(0, 0.001, n)),  # Random walk
-        'with_jump': np.concatenate([base[:500], base[500:] + 5.0]),  # Level shift
-        'fep_equilibration': base
-        + np.concatenate([np.linspace(5.0, 0.0, n // 4), np.zeros(3 * n // 4)]),
-    }
-
-
 class TestStatisticalInefficiency:
     """Test statistical inefficiency calculation with various scenarios."""
 
@@ -107,14 +89,6 @@ class TestStatisticalInefficiency:
 
         # Allow 20% tolerance for finite sample effects
         tolerance = 0.2 * theoretical_g
-        print(
-            'g_pymbar:',
-            g_pymbar,
-            'g_chodera:',
-            g_chodera,
-            'theoretical_g:',
-            theoretical_g,
-        )
         assert (
             abs(g_pymbar - theoretical_g) <= tolerance
         ), f"pymbar: expected g≈{theoretical_g:.1f}, got {g_pymbar:.2f}"
@@ -147,6 +121,76 @@ class TestStatisticalInefficiency:
         """Test error handling for invalid method."""
         with pytest.raises(ValueError, match="Unknown method"):
             calc_statistical_inefficiency(uncorrelated_data, method="invalid")
+
+
+class TestPreprocessing:
+    """Test data preprocessing functions."""
+
+    def test_no_preprocessing(self):
+        """Test that 'none' preprocessing returns unchanged data."""
+        data = np.array([1, 2, 3, 4, 5])
+        result = _preprocess_timeseries(data, "none")
+        np.testing.assert_array_equal(result, data)
+
+    def test_centering(self):
+        """Test centering preprocessing."""
+        data = np.array([5, 10, 15, 20])  # mean = 12.5
+        result = _preprocess_timeseries(data, "center")
+        expected = np.array([-7.5, -2.5, 2.5, 7.5])
+        np.testing.assert_array_almost_equal(result, expected)
+        assert abs(np.mean(result)) < 1e-10, "Centered data should have zero mean"
+
+    def test_standardization(self):
+        """Test standardization preprocessing."""
+        data = np.array([10, 20, 30, 40])
+        result = _preprocess_timeseries(data, "standardize")
+
+        assert abs(np.mean(result)) < 1e-10, "Standardized data should have zero mean"
+        assert (
+            abs(np.std(result, ddof=1) - 1.0) < 1e-10
+        ), "Standardized data should have unit variance"
+
+    def test_detrending(self):
+        """Test linear detrending."""
+        # Create data with known linear trend
+        x = np.arange(100)
+        slope = 0.5
+        intercept = 2.0
+        trend = slope * x + intercept
+        noise = np.random.normal(0, 0.1, 100)
+        data = trend + noise
+
+        detrended = _preprocess_timeseries(data, "detrend")
+
+        # After detrending, should have much smaller linear trend
+        x_detrend = np.arange(len(detrended))
+        residual_slope = np.polyfit(x_detrend, detrended, 1)[0]
+        assert abs(residual_slope) < 0.01, f"Residual slope {residual_slope} too large"
+
+    def test_differencing(self):
+        """Test first differencing."""
+        data = np.array([1, 3, 6, 10, 15])  # Cumulative sum
+        result = _preprocess_timeseries(data, "diff")
+        expected = np.array([2, 3, 4, 5])  # First differences
+        np.testing.assert_array_equal(result, expected)
+
+    def test_invalid_preprocessing(self):
+        """Test error handling for invalid preprocessing method."""
+        data = np.array([1, 2, 3, 4])
+        with pytest.raises(ValueError, match="Unknown preprocessing method"):
+            _preprocess_timeseries(data, "invalid_method")
+
+    def test_edge_cases_preprocessing(self):
+        """Test preprocessing edge cases."""
+        # Zero variance data for standardization
+        zeros = np.zeros(10)
+        result = _preprocess_timeseries(zeros, "standardize")
+        np.testing.assert_array_equal(result, zeros)
+
+        # Very short data for differencing
+        short_data = np.array([1])
+        result = _preprocess_timeseries(short_data, "diff")
+        np.testing.assert_array_equal(result, short_data)
 
 
 def test_subsample_correlated_data():
@@ -280,7 +324,7 @@ def test_multi_observable_analysis(lambda_data, analysis_windows):
 
     for obs in observables:
         assert obs in results, f"Missing results for {obs}"
-        dhdl_uncorr, potential_uncorr, num_samples = results[obs]
+        dhdl_uncorr, _, num_samples = results[obs]
 
         assert dhdl_uncorr is not None, f"dH/dλ should be available for {obs}"
         assert len(num_samples) == len(
