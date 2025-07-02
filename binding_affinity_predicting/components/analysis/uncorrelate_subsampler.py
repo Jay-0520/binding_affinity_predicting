@@ -24,6 +24,11 @@ def calc_statistical_inefficiency(
     """
     Calculate statistical inefficiency (correlation time) using pymbar.
 
+    g = 1 -> PERFECT independence - each data point is completely uncorrelated
+    g > 1 -> data points are correlated, g is the correlation time
+        - g = 5 -> Only 1 in 5 data points is truly independent
+        - g = 20 -> Only 1 in 20 data points is truly independent
+
     Parameters:
     -----------
     data : np.ndarray
@@ -36,6 +41,9 @@ def calc_statistical_inefficiency(
     float
         Statistical inefficiency (correlation time)
     """
+    if len(data) == 0:
+        raise ValueError("Cannot calculate statistical inefficiency for empty data")
+
     if len(data) < 10:
         return 1.0
 

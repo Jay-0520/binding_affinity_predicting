@@ -43,31 +43,110 @@ def analysis_windows(lambda_data):
     return start_indices, end_indices
 
 
-def test_calc_statistical_inefficiency_basic():
-    """Test statistical inefficiency calculation with synthetic data."""
-    # Test with uncorrelated data
-    uncorr_data = np.random.normal(0, 1, 1000)
-    g_uncorr = calc_statistical_inefficiency(uncorr_data)
-    assert 0.5 < g_uncorr < 2.0, f"Uncorrelated data should have g~1, got {g_uncorr}"
+@pytest.fixture
+def uncorrelated_data():
+    """Generate uncorrelated Gaussian data."""
+    np.random.seed(42)
+    return np.random.normal(0, 1, 1000)
 
-    # Test with correlated data (AR(1) process)
-    phi = 0.9  # Strong correlation
-    corr_data = np.zeros(1000)
-    corr_data[0] = np.random.normal()
-    for i in range(1, 1000):
-        corr_data[i] = phi * corr_data[i - 1] + np.sqrt(1 - phi**2) * np.random.normal()
 
-    g_corr = calc_statistical_inefficiency(corr_data)
-    assert g_corr > 5.0, f"Correlated data should have g>5, got {g_corr}"
+@pytest.fixture
+def correlated_data():
+    """Generate correlated AR(1) data with known properties."""
+    np.random.seed(42)
+    n = 1000
+    phi = 0.8  # AR(1) coefficient
+    sigma = 1.0
 
-    # Test edge cases
-    short_data = np.array([1, 2, 3])
-    g_short = calc_statistical_inefficiency(short_data)
-    assert g_short == 1.0, "Short data should return g=1"
+    data = np.zeros(n)
+    data[0] = np.random.normal(0, sigma)
+    for i in range(1, n):
+        data[i] = phi * data[i - 1] + np.sqrt(1 - phi**2) * np.random.normal(0, sigma)
 
-    zeros_data = np.zeros(100)
-    g_zeros = calc_statistical_inefficiency(zeros_data)
-    assert g_zeros == 1.0, "Zero variance data should return g=1"
+    # Theoretical statistical inefficiency for AR(1): g = (1 + phi) / (1 - phi)
+    theoretical_g = (1 + phi) / (1 - phi)
+
+    return data, theoretical_g
+
+
+@pytest.fixture
+def problematic_data():
+    """Generate data with common MD simulation problems."""
+    np.random.seed(42)
+    n = 1000
+
+    # Base stationary data
+    base = np.random.normal(0, 1, n)
+
+    return {
+        'with_trend': base + 0.01 * np.arange(n),  # Linear trend
+        'with_offset': base + 10.0,  # Large constant offset
+        'with_drift': base + np.cumsum(np.random.normal(0, 0.001, n)),  # Random walk
+        'with_jump': np.concatenate([base[:500], base[500:] + 5.0]),  # Level shift
+        'fep_equilibration': base
+        + np.concatenate([np.linspace(5.0, 0.0, n // 4), np.zeros(3 * n // 4)]),
+    }
+
+
+class TestStatisticalInefficiency:
+    """Test statistical inefficiency calculation with various scenarios."""
+
+    def test_uncorrelated_data(self, uncorrelated_data):
+        """Test with uncorrelated data (should give g ≈ 1)."""
+        g = calc_statistical_inefficiency(uncorrelated_data)
+        assert (
+            pytest.approx(1.0, rel=0.05) == g
+        ), f"Uncorrelated data should have g≈1, got {g:.2f}"
+
+    def test_correlated_data(self, correlated_data):
+        """Test with correlated data (compare to theoretical value)."""
+        data, theoretical_g = correlated_data
+
+        g_pymbar = calc_statistical_inefficiency(data, method="pymbar")
+        g_chodera = calc_statistical_inefficiency(data, method="chodera")
+
+        # Allow 20% tolerance for finite sample effects
+        tolerance = 0.2 * theoretical_g
+        print(
+            'g_pymbar:',
+            g_pymbar,
+            'g_chodera:',
+            g_chodera,
+            'theoretical_g:',
+            theoretical_g,
+        )
+        assert (
+            abs(g_pymbar - theoretical_g) <= tolerance
+        ), f"pymbar: expected g≈{theoretical_g:.1f}, got {g_pymbar:.2f}"
+        assert (
+            abs(g_chodera - theoretical_g) <= tolerance
+        ), f"chodera: expected g≈{theoretical_g:.1f}, got {g_chodera:.2f}"
+
+    def test_edge_cases(self):
+        """Test edge cases and error conditions."""
+        # Empty data
+        with pytest.raises(Exception):
+            calc_statistical_inefficiency(np.array([]))
+
+        # Very short data
+        short_data = np.array([1, 2, 3])
+        g_short = calc_statistical_inefficiency(short_data)
+        assert g_short == 1.0, "Short data should return g=1"
+
+        # Zero variance data
+        zeros = np.zeros(100)
+        g_zeros = calc_statistical_inefficiency(zeros)
+        assert g_zeros == 1.0, "Zero variance should return g=1"
+
+        # Data with NaN/Inf
+        bad_data = np.array([1, 2, np.nan, 4, np.inf, 6] * 100)
+        g_bad = calc_statistical_inefficiency(bad_data)
+        assert g_bad >= 1.0, "Should handle NaN/Inf gracefully"
+
+    def test_invalid_method(self, uncorrelated_data):
+        """Test error handling for invalid method."""
+        with pytest.raises(ValueError, match="Unknown method"):
+            calc_statistical_inefficiency(uncorrelated_data, method="invalid")
 
 
 def test_subsample_correlated_data():
