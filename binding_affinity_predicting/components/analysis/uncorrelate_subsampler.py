@@ -67,7 +67,6 @@ def calc_statistical_inefficiency(
             return float(
                 pymbar.timeseries.statistical_inefficiency(clean_data, fast=fast)
             )
-
         elif method == "chodera":
             return _statistical_inefficiency_chodera(clean_data, fast=fast)
         else:
