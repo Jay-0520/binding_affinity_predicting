@@ -18,6 +18,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from binding_affinity_predicting.components.analysis.utils import (
+    calculate_beta_parameter,
+)
 from binding_affinity_predicting.components.analysis.xvg_data_loader import (
     GromacsXVGParser,
     LambdaState,
@@ -288,32 +291,37 @@ def test_load_alchemical_data_output_structure_matches_conftest(
         xvg_files=xvg_file_paths, skip_time=0.0, temperature=300
     )
 
-    lambda_data_structure = {
-        'dhdl_timeseries': result_tar['dhdl_timeseries'],
+    lambda_data_structure_tar = {
+        'dhdl_timeseries': result_tar['dhdl_timeseries'],  # this is dimensionless
         'potential_energies': result_tar['potential_energies'],
         'lambda_vectors': result_tar['lambda_vectors'],
         'nsnapshots': result_tar['nsnapshots'],
     }
     # 'dhdlt', 'u_klt', 'lv', 'nsnapshots' are keys used by parser_gromacs.py
     lambda_data_structure_ref = {
-        'dhdl_timeseries': lambda_data['dhdlt'],
+        'dhdl_timeseries': lambda_data['dhdlt'],  # this has unit
         'potential_energies': lambda_data['u_klt'],
         'lambda_vectors': lambda_data['lv'],
         'nsnapshots': lambda_data['nsnapshots'],
     }
 
-    np.testing.assert_array_equal(
-        lambda_data_structure['dhdl_timeseries'],
+    beta = calculate_beta_parameter(temperature=300, units='kJ', software='Gromacs')
+
+    # Use assert_allclose for floating-point comparisons instead of assert_array_equal
+    np.testing.assert_allclose(
+        lambda_data_structure_tar['dhdl_timeseries'] / beta,  # convert to dimensionless
         lambda_data_structure_ref['dhdl_timeseries'],
+        rtol=1e-14,
+        atol=1e-14,
     )
     np.testing.assert_array_equal(
-        lambda_data_structure['lambda_vectors'],
+        lambda_data_structure_tar['lambda_vectors'],
         lambda_data_structure_ref['lambda_vectors'],
     )
     np.testing.assert_array_equal(
-        lambda_data_structure['nsnapshots'], lambda_data_structure_ref['nsnapshots']
+        lambda_data_structure_tar['nsnapshots'], lambda_data_structure_ref['nsnapshots']
     )
     np.testing.assert_array_equal(
-        lambda_data_structure['potential_energies'],
+        lambda_data_structure_tar['potential_energies'],
         lambda_data_structure_ref['potential_energies'],
     )
