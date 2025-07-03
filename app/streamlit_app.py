@@ -14,8 +14,6 @@ from binding_affinity_predicting.components.analysis.free_energy_estimators impo
 from binding_affinity_predicting.components.analysis.uncorrelate_subsampler import (
     perform_uncorrelating_subsampling,
 )
-
-# Import your analysis modules
 from binding_affinity_predicting.components.analysis.xvg_data_loader import (
     load_alchemical_data,
 )
@@ -126,7 +124,7 @@ def correlation_analysis_tab(temperature: float, skip_time: float):
 
         # Perform correlation analysis
         if st.button("🔍 Perform Correlation Analysis", type="primary"):
-            perform_correlation_analysis(
+            _perform_correlation_analysis(
                 alchemical_data, observable, min_uncorr_samples, fast_analysis
             )
 
@@ -142,7 +140,7 @@ def correlation_analysis_tab(temperature: float, skip_time: float):
                 pass
 
 
-def perform_correlation_analysis(
+def _perform_correlation_analysis(
     alchemical_data: dict, observable: str, min_uncorr_samples: int, fast_analysis: bool
 ):
     """Perform and display correlation analysis results."""
@@ -221,6 +219,9 @@ def perform_correlation_analysis(
     ax2.set_ylabel('Efficiency (%)')
     ax2.set_title('Sampling Efficiency per State')
     ax2.grid(True, alpha=0.3)
+    # Force integer ticks on the x-axis
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(x)
 
     plt.tight_layout()
     st.pyplot(fig)
@@ -310,7 +311,7 @@ def free_energy_estimation_tab(temperature: float, units: str):
 
     # Perform free energy estimation
     if st.button("🧮 Calculate Free Energies", type="primary"):
-        perform_free_energy_estimation(
+        _perform_free_energy_estimation(
             alchemical_data=alchemical_data,
             dhdl_uncorr=dhdl_uncorr,
             potential_uncorr=potential_uncorr,
@@ -324,7 +325,7 @@ def free_energy_estimation_tab(temperature: float, units: str):
         )
 
 
-def perform_free_energy_estimation(
+def _perform_free_energy_estimation(
     alchemical_data: dict,
     dhdl_uncorr: Optional[np.ndarray],
     potential_uncorr: Optional[np.ndarray],
