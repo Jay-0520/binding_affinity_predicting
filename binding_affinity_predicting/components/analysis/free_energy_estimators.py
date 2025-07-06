@@ -1885,3 +1885,53 @@ class FreeEnergyEstimator:
                         }
 
         return results
+
+
+def _compute_dg_internal(
+    lambda_windows: list,
+    run_no: int,
+    start_frac: float,
+    end_frac: float,
+    equilibrated: bool,
+    temperature: float = 298.15,
+    units: str = 'kcal',
+    software: str = 'Gromacs',
+) -> float:
+    """
+    Helper function to compute the free energy change for a single run.
+    """
+    try:
+        # Initialize free energy estimator
+        fe_estimator = FreeEnergyEstimator(
+            temperature=temperature, units=units, software=software
+        )
+
+        # Prepare potential energy data for MBAR
+        potential_energies, sample_counts = _prepare_mbar_data_from_windows(
+            lambda_windows, run_no, start_frac, end_frac, equilibrated
+        )
+
+        if potential_energies is None or len(sample_counts) == 0:
+            logger.warning(
+                f"No data for run {run_no}, fractions {start_frac}-{end_frac}"
+            )
+            return 0.0
+
+        # Use internal MBAR estimator
+        result = fe_estimator.estimate_mbar(
+            potential_energies,
+            np.array(sample_counts),
+            regular_estimate=False,  # Just get endpoint difference
+        )
+
+        if result['success']:
+            return result['free_energy']
+        else:
+            logger.warning(
+                f"MBAR failed for run {run_no}, fractions {start_frac}-{end_frac}: {result.get('error_message', 'Unknown error')}"
+            )
+            return 0.0
+
+    except Exception as e:
+        logger.error(f"Error computing dG for run {run_no}: {e}")
+        return 0.0
