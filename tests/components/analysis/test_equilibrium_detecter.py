@@ -1,6 +1,5 @@
 import logging
 import pickle
-from typing import List, Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -34,7 +33,7 @@ def data_for_running_mbar(test_data_dir) -> dict:
 class MockLambdaWindow:
     """Mock LambdaWindow class for testing."""
 
-    def __init__(self, lam_state: float, lam_val_weight: float = None):
+    def __init__(self, lam_state: float, lam_val_weight: float):
         self.lam_state = lam_state
         self.lam_val_weight = lam_val_weight
 
@@ -58,7 +57,6 @@ class MockGradientAnalyzer:
 
         window_data_key = f"lambda_{float(lam_win.lam_state):.3f}"
         window_data = self.pickle_data['windows'][window_data_key]
-        # logger.info(f"Processing window: {window_data_key}")
 
         for run_no in run_nos:
             run_key = f'run_{run_no}'
@@ -117,7 +115,7 @@ def test_compute_dg_mbar_1(data_for_running_mbar):
     with (
         patch('pathlib.Path.exists', return_value=True),
         patch(
-            'binding_affinity_predicting.components.analysis.equilibrium_detecter._load_alchemical_data_for_run',
+            'binding_affinity_predicting.components.analysis.equilibrium_detecter._load_alchemical_data_for_run',  # noqa: E501
             return_value=data_for_running_mbar,
         ),
     ):
@@ -154,7 +152,7 @@ def test_compute_dg_mbar_2(data_for_running_mbar):
     with (
         patch('pathlib.Path.exists', return_value=True),
         patch(
-            'binding_affinity_predicting.components.analysis.equilibrium_detecter._load_alchemical_data_for_run',
+            'binding_affinity_predicting.components.analysis.equilibrium_detecter._load_alchemical_data_for_run',  # noqa: E501
             return_value=data_for_running_mbar,
         ),
     ):
