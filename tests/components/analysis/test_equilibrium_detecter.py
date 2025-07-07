@@ -1,4 +1,5 @@
 import logging
+import os
 import pickle
 from unittest.mock import patch
 
@@ -25,7 +26,7 @@ def data_for_running_mbar(test_data_dir) -> dict:
     note that percentage_end=100.0 so in this case
     end_frac must be 1.0
     """
-    mbar_pickle_path = test_data_dir / "mbar_data.pkl"
+    mbar_pickle_path = test_data_dir / "data_for_mbar.pkl"
     with open(mbar_pickle_path, 'rb') as f:
         return pickle.load(f)
 
@@ -33,9 +34,19 @@ def data_for_running_mbar(test_data_dir) -> dict:
 class MockLambdaWindow:
     """Mock LambdaWindow class for testing."""
 
-    def __init__(self, lam_state: float, lam_val_weight: float):
+    def __init__(
+        self,
+        lam_state: float,
+        lam_val_weight: float,
+        ensemble_size: int = 5,
+        output_dir: str = None,
+    ):
         self.lam_state = lam_state
         self.lam_val_weight = lam_val_weight
+        self.ensemble_size = ensemble_size
+        if output_dir is None:
+            output_dir = os.getcwd()
+        self.output_dir = output_dir
 
 
 class MockGradientAnalyzer:
@@ -54,10 +65,8 @@ class MockGradientAnalyzer:
         """
         times_list = []
         gradients_list = []
-
         window_data_key = f"lambda_{float(lam_win.lam_state):.3f}"
         window_data = self.pickle_data['windows'][window_data_key]
-
         for run_no in run_nos:
             run_key = f'run_{run_no}'
             run_data = window_data['runs'][run_key]
@@ -71,7 +80,7 @@ class MockGradientAnalyzer:
 
 def test_get_time_series_multiwindow(lambda_windows_data):
     """
-    Test the _get_time_series_multiwindow method against reference values.
+    Test the _get_time_series_multiwindow() method against reference values.
 
     This test loads pickle data, creates mock objects, calls the method,
     and compares the mean of overall_dgs and overall_times to expected values.
@@ -101,41 +110,9 @@ def test_get_time_series_multiwindow(lambda_windows_data):
     assert overall_times.sum(axis=0)[-1] == pytest.approx(2.4, abs=1e-2)
 
 
-def test_compute_dg_mbar_1(data_for_running_mbar):
-    """Test _compute_dg_mbar with real MBAR calculations using actual data"""
-    lambda_windows = [
-        MockLambdaWindow(0.000, lam_val_weight=0.0625),
-        MockLambdaWindow(0.125, lam_val_weight=0.125),
-        MockLambdaWindow(0.250, lam_val_weight=0.125),
-        MockLambdaWindow(0.375, lam_val_weight=0.125),
-        MockLambdaWindow(0.500, lam_val_weight=0.3125),
-        MockLambdaWindow(1.000, lam_val_weight=0.25),
-    ]
-
-    with (
-        patch('pathlib.Path.exists', return_value=True),
-        patch(
-            'binding_affinity_predicting.components.analysis.equilibrium_detecter._load_alchemical_data_for_run',  # noqa: E501
-            return_value=data_for_running_mbar,
-        ),
-    ):
-
-        result = _compute_dg_mbar(
-            run_no=1,
-            start_frac=0.0,
-            end_frac=1.0,
-            lambda_windows=lambda_windows,
-            equilibrated=False,
-            temperature=298.15,
-            units="kcal",
-        )
-
-    assert pytest.approx(1.5087, rel=0.001) == result
-
-
-def test_compute_dg_mbar_2(data_for_running_mbar):
+def test_compute_dg_mbar_with_start_frac_zero(mocker, data_for_running_mbar):
     """
-    Test _compute_dg_mbar with real MBAR calculations using actual data
+    Test _compute_dg_mbar() with real MBAR calculations using actual data
 
     The reference value was computed by subjecting the same data to a3fe _compute_dg() from
     https://github.com/michellab/a3fe/blob/main/a3fe/analyse/process_grads.py  _compute_dg()
@@ -148,23 +125,122 @@ def test_compute_dg_mbar_2(data_for_running_mbar):
         MockLambdaWindow(0.500, lam_val_weight=0.3125),
         MockLambdaWindow(1.000, lam_val_weight=0.25),
     ]
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch(
+        "binding_affinity_predicting.components.analysis."
+        "equilibrium_detecter._load_alchemical_data_for_run",
+        return_value=data_for_running_mbar,
+    )
+    result = _compute_dg_mbar(
+        run_no=1,
+        start_frac=0.99,
+        end_frac=1.0,
+        lambda_windows=lambda_windows,
+        equilibrated=False,
+        temperature=298.15,
+        units="kcal",
+    )
 
-    with (
-        patch('pathlib.Path.exists', return_value=True),
-        patch(
-            'binding_affinity_predicting.components.analysis.equilibrium_detecter._load_alchemical_data_for_run',  # noqa: E501
-            return_value=data_for_running_mbar,
-        ),
-    ):
+    assert pytest.approx(1.5087, rel=0.001) == result
 
-        result = _compute_dg_mbar(
-            run_no=1,
-            start_frac=0.5,
-            end_frac=1.0,
-            lambda_windows=lambda_windows,
-            equilibrated=False,
-            temperature=298.15,
-            units="kcal",
-        )
+
+def test_compute_dg_mbar_with_start_frac_nonzero(mocker, data_for_running_mbar):
+    """
+    Test _compute_dg_mbar() with real MBAR calculations using actual data
+
+    The reference value was computed by subjecting the same data to a3fe _compute_dg() from
+    https://github.com/michellab/a3fe/blob/main/a3fe/analyse/process_grads.py  _compute_dg()
+    """
+    lambda_windows = [
+        MockLambdaWindow(0.000, lam_val_weight=0.0625),
+        MockLambdaWindow(0.125, lam_val_weight=0.125),
+        MockLambdaWindow(0.250, lam_val_weight=0.125),
+        MockLambdaWindow(0.375, lam_val_weight=0.125),
+        MockLambdaWindow(0.500, lam_val_weight=0.3125),
+        MockLambdaWindow(1.000, lam_val_weight=0.25),
+    ]
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch(
+        "binding_affinity_predicting.components.analysis."
+        "equilibrium_detecter._load_alchemical_data_for_run",
+        return_value=data_for_running_mbar,
+    )
+    result = _compute_dg_mbar(
+        run_no=1,
+        start_frac=0.995,
+        end_frac=1.0,
+        lambda_windows=lambda_windows,
+        equilibrated=False,
+        temperature=298.15,
+        units="kcal",
+    )
 
     assert pytest.approx(1.2491, rel=0.001) == result
+
+
+def test_get_time_series_multiwindow_mbar_zero(mocker, data_for_running_mbar):
+    """
+    Test the _get_time_series_multiwindow_mbar() method against reference values.
+
+    This test loads pickle data, creates mock objects, calls the method,
+    and compares the mean of overall_dgs and overall_times to expected values.
+    """
+    detector = EquilibriumMultiwindowDetector(method="paired_t")
+
+    # This setting is based on data from test_data "lambda_windows_data.pkl"
+    lambda_windows = [
+        MockLambdaWindow(0.000, lam_val_weight=0.0625),
+        MockLambdaWindow(0.125, lam_val_weight=0.125),
+        MockLambdaWindow(0.250, lam_val_weight=0.125),
+        MockLambdaWindow(0.375, lam_val_weight=0.125),
+        MockLambdaWindow(0.500, lam_val_weight=0.3125),
+        MockLambdaWindow(1.000, lam_val_weight=0.25),
+    ]
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch(
+        "binding_affinity_predicting.components.analysis."
+        "equilibrium_detecter._load_alchemical_data_for_run",
+        return_value=data_for_running_mbar,
+    )
+    overall_dgs, _ = detector._get_time_series_multiwindow_mbar(
+        lambda_windows=lambda_windows,
+        run_nos=[1],
+        start_frac=0.0,
+        end_frac=1.0,
+        use_multiprocessing=False,
+    )
+    assert pytest.approx(1.50877812, rel=0.001) == overall_dgs.mean(axis=0)[-1]
+
+
+def test_get_time_series_multiwindow_mbar_nonzero(mocker, data_for_running_mbar):
+    """
+    Test the _get_time_series_multiwindow_mbar() method against reference values.
+
+    This test loads pickle data, creates mock objects, calls the method,
+    and compares the mean of overall_dgs and overall_times to expected values.
+    """
+    detector = EquilibriumMultiwindowDetector(method="paired_t")
+
+    # This setting is based on data from test_data "lambda_windows_data.pkl"
+    lambda_windows = [
+        MockLambdaWindow(0.000, lam_val_weight=0.0625),
+        MockLambdaWindow(0.125, lam_val_weight=0.125),
+        MockLambdaWindow(0.250, lam_val_weight=0.125),
+        MockLambdaWindow(0.375, lam_val_weight=0.125),
+        MockLambdaWindow(0.500, lam_val_weight=0.3125),
+        MockLambdaWindow(1.000, lam_val_weight=0.25),
+    ]
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch(
+        "binding_affinity_predicting.components.analysis."
+        "equilibrium_detecter._load_alchemical_data_for_run",
+        return_value=data_for_running_mbar,
+    )
+    overall_dgs, _ = detector._get_time_series_multiwindow_mbar(
+        lambda_windows=lambda_windows,
+        run_nos=[1],
+        start_frac=0.5,
+        end_frac=1.0,
+        use_multiprocessing=False,
+    )
+    assert pytest.approx(1.249191, rel=0.001) == overall_dgs.mean(axis=0)[-1]

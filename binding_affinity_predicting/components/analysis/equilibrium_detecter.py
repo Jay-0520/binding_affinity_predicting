@@ -46,154 +46,6 @@ class EquilibriumDetectionError(Exception):
     pass
 
 
-def _load_alchemical_data_for_run(
-    lambda_windows: list[LambdaWindow],
-    run_no: int,
-    temperature: float = 298.15,
-    skip_time: float = 0.0,
-    reduce_to_dimensionless: bool = True,
-    use_equilibrated: bool = False,
-) -> dict:
-    xvg_files = []
-    for window in lambda_windows:
-        run_dir = Path(window.output_dir) / f"run_{run_no}"
-        if use_equilibrated:
-            # Look for equilibrated simulation files
-            xvg_file = (
-                run_dir / f"lambda_{window.lam_state}_run_{run_no}_equilibrated.xvg"
-            )
-            # Or however your equilibrated files are named
-        else:
-            xvg_file = run_dir / f"lambda_{window.lam_state}_run_{run_no}.xvg"
-
-        if xvg_file.exists():
-            xvg_files.append(xvg_file)
-        else:
-            logger.warning(f"XVG file not found: {xvg_file}")
-            return None
-
-    if not xvg_files:
-        logger.warning(f"No XVG files found for run {run_no}")
-        return None
-
-    # Load alchemical data
-    alchemical_data = load_alchemical_data(
-        xvg_files=xvg_files,
-        skip_time=skip_time,
-        temperature=temperature,
-        reduce_to_dimensionless=reduce_to_dimensionless,
-    )
-
-    return alchemical_data
-
-
-def _compute_dg_mbar(
-    run_no: int,
-    start_frac: float,
-    end_frac: float,
-    lambda_windows: list[LambdaWindow],
-    equilibrated: bool = False,
-    temperature: float = 298.15,
-    units: str = "kcal",
-) -> float:
-    """
-    Helper function to compute free energy change using MBAR for a list of time windows.
-
-    This function is designed to be used with multiprocessing.
-
-    Parameters
-    ----------
-    run_no : int
-        Run number to analyze
-    start_frac : float
-        Start fraction of simulation time
-    end_frac : float
-        End fraction of simulation time
-    lambda_windows : List[LambdaWindow]
-        List of lambda windows
-    equilibrated : bool
-        Whether to use equilibration times
-    temperature : float
-        Temperature in Kelvin
-    units : str
-        Units for output
-
-    Returns
-    -------
-    float
-        Free energy change from MBAR
-    """
-    try:
-        # Load data for this run
-        alchemical_data = _load_alchemical_data_for_run(
-            lambda_windows=lambda_windows,
-            run_no=run_no,
-            temperature=temperature,
-            skip_time=0.0,
-            use_equilibrated=equilibrated,
-        )
-
-        if alchemical_data is None:
-            return np.nan
-
-        # Extract data arrays
-        potential_energies = alchemical_data['potential_energies']
-        nsnapshots = alchemical_data['nsnapshots']
-
-        # Determine time window indices
-        # max_snapshots = potential_energies.shape[2]
-        total_snapshots = min(nsnapshots)  # Use minimum to ensure all windows have data
-
-        # Apply equilibration if requested
-        equil_offset = 0
-        if equilibrated:
-            raise NotImplementedError(
-                "Equilibration handling is not implemented in this function _compute_dg_mbar()."
-            )
-
-        # Calculate time window boundaries
-        start_idx = equil_offset + int(start_frac * (total_snapshots - equil_offset))
-        end_idx = equil_offset + int(end_frac * (total_snapshots - equil_offset))
-
-        if end_idx <= start_idx:
-            logger.warning(
-                f"Invalid time window for run {run_no}: {start_idx}-{end_idx}"
-            )
-            return np.nan
-
-        # Extract time window data
-        window_potential = potential_energies[:, :, start_idx:end_idx]
-        window_samples = np.full(len(lambda_windows), end_idx - start_idx, dtype=int)
-
-        # TODO: do we really need this check? if so, what is the cutoff?
-        if window_samples[0] < 2:
-            logger.warning(f"Too few samples in time window for run {run_no}")
-            return np.nan
-
-        # Run MBAR on this time window
-        estimator = FreeEnergyEstimator(
-            temperature=temperature, units=units, software="Gromacs"
-        )
-
-        result = estimator.estimate_mbar(
-            potential_energies=window_potential,
-            num_samples_per_state=window_samples,
-            regular_estimate=False,  # Just return endpoint free energy
-        )
-
-        if result['success']:
-            return result['free_energy']
-        else:
-            logger.warning(
-                f"MBAR failed for run {run_no}, time window {start_frac}-{end_frac}"
-            )
-            return np.nan
-
-    except Exception as e:
-        logger.warning(f"Error computing MBAR for run {run_no}: {e}")
-        return np.nan
-
-
 class EquilibriumBlockGradientDetector:
     """
     Equilibrium detection based on gradient of block-averaged dH/dλ.
@@ -343,6 +195,154 @@ class EquilibriumBlockGradientDetector:
             f.write(f"Run numbers: {run_nos}\n")
 
 
+def _load_alchemical_data_for_run(
+    lambda_windows: list[LambdaWindow],
+    run_no: int,
+    temperature: float = 298.15,
+    skip_time: float = 0.0,
+    reduce_to_dimensionless: bool = True,
+    use_equilibrated: bool = False,
+) -> dict:
+    xvg_files = []
+    for window in lambda_windows:
+        run_dir = Path(window.output_dir) / f"run_{run_no}"
+        if use_equilibrated:
+            # Look for equilibrated simulation files
+            xvg_file = (
+                run_dir / f"lambda_{window.lam_state}_run_{run_no}_equilibrated.xvg"
+            )
+            # Or however your equilibrated files are named
+        else:
+            xvg_file = run_dir / f"lambda_{window.lam_state}_run_{run_no}.xvg"
+
+        if xvg_file.exists():
+            xvg_files.append(xvg_file)
+        else:
+            logger.warning(f"XVG file not found: {xvg_file}")
+            return None
+
+    if not xvg_files:
+        logger.warning(f"No XVG files found for run {run_no}")
+        return None
+
+    # Load alchemical data
+    alchemical_data = load_alchemical_data(
+        xvg_files=xvg_files,
+        skip_time=skip_time,
+        temperature=temperature,
+        reduce_to_dimensionless=reduce_to_dimensionless,
+    )
+
+    return alchemical_data
+
+
+def _compute_dg_mbar(
+    run_no: int,
+    start_frac: float,
+    end_frac: float,
+    lambda_windows: list[LambdaWindow],
+    equilibrated: bool = False,
+    temperature: float = 298.15,
+    units: str = "kcal",
+) -> float:
+    """
+    Helper function to compute free energy change using MBAR for a list of time windows.
+
+    This function is designed to be used with multiprocessing.
+
+    Parameters
+    ----------
+    run_no : int
+        Run number to analyze
+    start_frac : float
+        Start fraction of simulation time
+    end_frac : float
+        End fraction of simulation time
+    lambda_windows : List[LambdaWindow]
+        List of lambda windows
+    equilibrated : bool
+        Whether to use equilibration times
+    temperature : float
+        Temperature in Kelvin
+    units : str
+        Units for output
+
+    Returns
+    -------
+    float
+        Free energy change from MBAR
+    """
+    try:
+        # Load data for this run
+        alchemical_data = _load_alchemical_data_for_run(
+            lambda_windows=lambda_windows,
+            run_no=run_no,
+            temperature=temperature,
+            skip_time=0.0,
+            use_equilibrated=equilibrated,
+        )
+
+        if alchemical_data is None:
+            logger.warning(
+                f"No alchemical data found for run {run_no}. Skipping MBAR computation."
+            )
+            return np.nan
+
+        potential_energies = alchemical_data['potential_energies']
+        nsnapshots = alchemical_data['nsnapshots']
+
+        # Determine time window indices
+        total_snapshots = min(nsnapshots)  # Use minimum to ensure all windows have data
+
+        equil_offset = 0
+        if equilibrated:
+            raise NotImplementedError(
+                "Equilibration handling is not implemented in this function _compute_dg_mbar()."
+            )
+
+        # Calculate time window boundaries
+        start_idx = equil_offset + int(start_frac * (total_snapshots - equil_offset))
+        end_idx = equil_offset + int(end_frac * (total_snapshots - equil_offset))
+
+        if end_idx <= start_idx:
+            logger.warning(
+                f"Invalid time window for run {run_no}: {start_idx}-{end_idx}"
+            )
+            return np.nan
+
+        # Extract time window data
+        window_potential = potential_energies[:, :, start_idx:end_idx]
+        window_samples = np.full(len(lambda_windows), end_idx - start_idx, dtype=int)
+
+        # TODO: do we really need this check? if so, what is the cutoff?
+        if window_samples[0] < 2:
+            logger.warning(f"Too few samples in time window for run {run_no}")
+            return np.nan
+
+        # Run MBAR on this time window
+        estimator = FreeEnergyEstimator(
+            temperature=temperature, units=units, software="Gromacs"
+        )
+
+        result = estimator.estimate_mbar(
+            potential_energies=window_potential,
+            num_samples_per_state=window_samples,
+            regular_estimate=False,  # Just return endpoint free energy
+        )
+
+        if result['success']:
+            return result['free_energy']
+        else:
+            logger.warning(
+                f"MBAR failed for run {run_no}, time window {start_frac}-{end_frac}"
+            )
+            return np.nan
+
+    except Exception as e:
+        logger.warning(f"Error computing MBAR for run {run_no}: {e}")
+        return np.nan
+
+
 class EquilibriumMultiwindowDetector:
     """
     Multi-window equilibrium detection based on cumulative free energy changes.
@@ -421,15 +421,18 @@ class EquilibriumMultiwindowDetector:
             return False, None
 
     def _detect_paired_t_based(
-        self, leg: Leg, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self,
+        lambda_windows: list[LambdaWindow],
+        run_nos: Optional[list[int]] = None,
+        output_dir: Optional[str] = None,
+    ) -> tuple[bool, Optional[float]]:
         """
         Paired t-test based detection - exact implementation from a3fe.
         """
         from scipy import stats
 
         if run_nos is None:
-            run_nos = list(range(1, leg.lambda_windows[0].ensemble_size + 1))
+            run_nos = list(range(1, lambda_windows[0].ensemble_size + 1))
 
         # Initialize results storage
         p_vals_and_times = []
@@ -441,64 +444,54 @@ class EquilibriumMultiwindowDetector:
         start_fracs = np.linspace(0, 1 - self.last_frac, num=self.intervals)
 
         for start_frac in start_fracs:
-            try:
-                # Get time series data using MBAR-like approach
-                overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
-                    leg.lambda_windows, run_nos, start_frac
-                )
+            # Get time series data using MBAR-like approach
+            overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
+                lambda_windows, run_nos, start_frac  # Pass lambda_windows directly
+            )
 
-                # Calculate slice indices
-                first_slice_end_idx = round(self.first_frac * len(overall_dgs[0]))
-                last_slice_start_idx = round((1 - self.last_frac) * len(overall_dgs[0]))
+            # Calculate slice indices
+            first_slice_end_idx = round(self.first_frac * len(overall_dgs[0]))
+            last_slice_start_idx = round((1 - self.last_frac) * len(overall_dgs[0]))
 
-                # Extract slices
-                first_slice = overall_dgs[:, :first_slice_end_idx]
-                last_slice = overall_dgs[:, last_slice_start_idx:]
+            # Extract slices
+            first_slice = overall_dgs[:, :first_slice_end_idx]
+            last_slice = overall_dgs[:, last_slice_start_idx:]
 
-                # Calculate means for each run
-                first_slice_means = np.mean(first_slice, axis=1)
-                last_slice_means = np.mean(last_slice, axis=1)
+            # Calculate means for each run
+            first_slice_means = np.mean(first_slice, axis=1)
+            last_slice_means = np.mean(last_slice, axis=1)
 
-                # Perform paired t-test
-                _, p_value = stats.ttest_rel(
-                    first_slice_means, last_slice_means, alternative="two-sided"
-                )
+            # Perform paired t-test
+            _, p_value = stats.ttest_rel(
+                first_slice_means, last_slice_means, alternative="two-sided"
+            )
 
-                # Store results
-                p_vals_and_times.append((p_value, overall_times[0][0]))
+            # Store results
+            p_vals_and_times.append((p_value, overall_times[0][0]))
 
-                # Check if equilibrated
-                if p_value > self.p_cutoff and not equilibrated:
-                    equilibrated = True
-                    fractional_equil_time = start_frac
-                    equil_time = overall_times[0][0]
-
-            except Exception as e:
-                logger.warning(f"Failed to analyze start_frac {start_frac}: {e}")
-                continue
+            # Check if equilibrated
+            if p_value > self.p_cutoff and not equilibrated:
+                equilibrated = True
+                fractional_equil_time = start_frac
+                equil_time = overall_times[0][0]
 
         # Update lambda window attributes if equilibrated
         if equilibrated:
-            for lam_win in leg.lambda_windows:
-                if hasattr(lam_win, '_equilibrated'):
-                    lam_win._equilibrated = True
-                if hasattr(lam_win, '_equil_time') and hasattr(
-                    lam_win, 'get_tot_simtime'
-                ):
-                    # Equilibration time per simulation
-                    lam_win._equil_time = (
-                        fractional_equil_time * lam_win.get_tot_simtime([1])
-                    )
+            for lam_win in lambda_windows:
+                lam_win._equilibrated = True
+                lam_win._equil_time = fractional_equil_time * lam_win.get_tot_simtime(
+                    [1]
+                )
 
-        # Save results to file
-        self._save_paired_t_results(
-            leg,
-            equilibrated,
-            p_vals_and_times,
-            fractional_equil_time,
-            equil_time,
-            run_nos,
-        )
+        if output_dir is not None:
+            self._save_paired_t_results(
+                output_dir,
+                equilibrated,
+                p_vals_and_times,
+                fractional_equil_time,
+                equil_time,
+                run_nos,
+            )
 
         return equilibrated, fractional_equil_time
 
@@ -599,7 +592,7 @@ class EquilibriumMultiwindowDetector:
         units: str = "kcal",
         n_points: int = 100,
         use_multiprocessing: bool = True,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Get time series of free energy changes using MBAR analysis.
 
@@ -610,8 +603,6 @@ class EquilibriumMultiwindowDetector:
         ----------
         lambda_windows : List[LambdaWindow]
             List of lambda windows to analyze
-        output_dir : str
-            Output directory (for logging/debugging)
         equilibrated : bool, default False
             Whether to account for equilibration times
         run_nos : List[int], optional
@@ -661,11 +652,9 @@ class EquilibriumMultiwindowDetector:
             raise ValueError("No valid run numbers found")
 
         n_runs = len(run_nos)
-
         # Initialize output arrays
         overall_dgs = np.zeros([n_runs, n_points])
         overall_times = np.zeros([n_runs, n_points])
-
         # Create time window fractions
         start_and_end_fracs = [
             (i, i + (end_frac - start_frac) / n_points)
@@ -673,7 +662,6 @@ class EquilibriumMultiwindowDetector:
         ][
             :-1
         ]  # Remove last point to avoid > 1
-
         # Round to avoid floating point errors
         start_and_end_fracs = [
             (round(x[0], 5), round(x[1], 5)) for x in start_and_end_fracs
@@ -772,8 +760,8 @@ class EquilibriumMultiwindowDetector:
         return overall_dgs, overall_times
 
     def _detect_gradient_based(
-        self, leg: Leg, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self, leg: Leg, run_nos: Optional[list[int]] = None
+    ) -> tuple[bool, Optional[float]]:
         """Gradient-based multi-window detection."""
         # Simplified gradient-based approach
         for discard_fraction in [0.0, 0.1, 0.3, 0.6]:
@@ -805,8 +793,8 @@ class EquilibriumMultiwindowDetector:
         return False, None
 
     def _detect_kpss_based(
-        self, leg: Leg, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self, leg: Leg, run_nos: Optional[list[int]] = None
+    ) -> tuple[bool, Optional[float]]:
         """KPSS stationarity test based detection."""
         for discard_fraction in [0.0, 0.1, 0.3, 0.5]:
             try:
@@ -833,8 +821,8 @@ class EquilibriumMultiwindowDetector:
         return False, None
 
     def _detect_geweke_based(
-        self, leg: Leg, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self, leg: Leg, run_nos: Optional[list[int]] = None
+    ) -> tuple[bool, Optional[float]]:
         """Modified Geweke test based detection."""
         from scipy import stats
 

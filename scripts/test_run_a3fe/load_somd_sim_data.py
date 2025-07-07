@@ -145,7 +145,7 @@ def extract_lambda_from_path(file_path: str) -> float:
     raise ValueError(f"Could not extract lambda value from path: {file_path}")
 
 
-def load_somd_alchemical_data(
+def load_somd_alchemical_data_trunc(
     dat_files: List[str],
     temperature: float = 298.15,
     start_frac: float = 0.0,
@@ -282,40 +282,16 @@ def load_a3fe_mbar_data(
     percentage_end: float,
     temperature: float = 298.15,
 ) -> Dict:
-    """
-    Load MBAR data exactly as a3fe's analyse_freenrg command would see it.
-    This mimics the file pattern: {output_dir}/lambda*/run_{run_no}/simfile_truncated_*.dat
-
-    Parameters
-    ----------
-    output_dir : str
-        Base output directory containing lambda* subdirectories
-    run_no : int
-        Run number to analyze
-    percentage_start : float
-        Start percentage for data window
-    percentage_end : float
-        End percentage for data window
-    temperature : float
-        Temperature in Kelvin
-
-    Returns
-    -------
-    Dict
-        Dictionary with potential_energies array and metadata compatible with MBAR
-    """
-    # Construct the exact file pattern that analyse_freenrg uses
-    pattern = f"simfile_truncated_{round(percentage_end, 3)}_end_{round(percentage_start, 3)}_start.dat"
-
-    # Find all lambda directories
+    # pattern = f"simfile_truncated_{round(percentage_end, 3)}_end_{round(percentage_start, 3)}_start.dat"
+    pattern = (
+        f"simfile_truncated_{percentage_end:.3f}_end_{percentage_start:.3f}_start.dat"
+    )
     lambda_dirs = sorted(Path(output_dir).glob("lambda*"))
 
     if not lambda_dirs:
         raise FileNotFoundError(f"No lambda* directories found in {output_dir}")
 
-    # Collect all .dat files for this run across all lambda windows
     dat_files_with_lambda = []
-
     for lambda_dir in lambda_dirs:
         # Extract lambda value from directory name
         try:
@@ -324,7 +300,6 @@ def load_a3fe_mbar_data(
             logger.warning(f"Could not extract lambda from directory: {lambda_dir}")
             continue
 
-        # Construct path to the specific run and file
         run_dir = lambda_dir / f"run_{run_no:02d}"
         dat_file = run_dir / pattern
 
@@ -347,10 +322,62 @@ def load_a3fe_mbar_data(
     dat_files = [item[1] for item in dat_files_with_lambda]
 
     # Load the data using the existing helper function
-    alchemical_data = load_somd_alchemical_data(
+    alchemical_data = load_somd_alchemical_data_trunc(
         dat_files=dat_files,
         temperature=temperature,
         start_frac=0.0,  # Files are already truncated to the desired window
+        end_frac=1.0,
+    )
+
+    return alchemical_data
+
+
+def load_a3fe_mbar_data_complete(
+    output_dir: str,
+    run_no: int,
+    temperature: float = 298.15,
+) -> Dict:
+    # pattern = f"simfile_truncated_{round(percentage_end, 3)}_end_{round(percentage_start, 3)}_start.dat"
+    pattern = f"simfile_equilibrated.dat"
+    lambda_dirs = sorted(Path(output_dir).glob("lambda*"))
+
+    if not lambda_dirs:
+        raise FileNotFoundError(f"No lambda* directories found in {output_dir}")
+
+    dat_files_with_lambda = []
+    for lambda_dir in lambda_dirs:
+        try:
+            lambda_val = extract_lambda_from_path(str(lambda_dir))
+        except ValueError:
+            logger.warning(f"Could not extract lambda from directory: {lambda_dir}")
+            continue
+
+        run_dir = lambda_dir / f"run_{run_no:02d}"
+        dat_file = run_dir / pattern
+
+        if dat_file.exists():
+            dat_files_with_lambda.append((lambda_val, str(dat_file)))
+            logger.info(f"Found file for λ={lambda_val}: {dat_file}")
+        else:
+            logger.warning(f"Missing file: {dat_file}")
+
+    if not dat_files_with_lambda:
+        raise FileNotFoundError(
+            f"No .dat files found for run {run_no} with pattern {pattern}"
+        )
+
+    # Sort by lambda value (same as analyse_freenrg would do)
+    dat_files_with_lambda.sort(key=lambda x: x[0])
+
+    logger.info(f"Loading {len(dat_files_with_lambda)} lambda windows for run {run_no}")
+    lambda_values = [item[0] for item in dat_files_with_lambda]
+    dat_files = [item[1] for item in dat_files_with_lambda]
+
+    # Load the data using the existing helper function
+    alchemical_data = load_somd_alchemical_data_trunc(
+        dat_files=dat_files,
+        temperature=temperature,
+        start_frac=0.0,
         end_frac=1.0,
     )
 
@@ -371,11 +398,9 @@ if __name__ == "__main__":
     #     temperature=298.15
     # )
 
-    results = load_a3fe_mbar_data(
+    results = load_a3fe_mbar_data_complete(
         output_dir="/Users/jingjinghuang/Documents/fep_workflow/test_analysis/example_restraint_stage/output",
         run_no=1,
-        percentage_start=99.0,
-        percentage_end=100.0,
         temperature=298.15,
     )
 
