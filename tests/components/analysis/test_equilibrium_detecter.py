@@ -1,7 +1,6 @@
 import logging
 import os
 import pickle
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -20,13 +19,26 @@ def data_for_running_mbar(test_data_dir) -> dict:
     """
     load mbar data from pickle file
 
-    This data was obtained by running this script
-    binding_affinity_predicting/scripts/test_run_a3fe/load_somd_sim_data.py
+    This data was obtained by running this script:
+    /binding_affinity_predicting/scripts/test_run_a3fe/load_somd_sim_data.py
 
     note that percentage_end=100.0 so in this case
     end_frac must be 1.0
     """
     mbar_pickle_path = test_data_dir / "data_for_mbar.pkl"
+    with open(mbar_pickle_path, 'rb') as f:
+        return pickle.load(f)
+
+
+@pytest.fixture(scope="module")
+def data_for_detecting_equil(test_data_dir) -> dict:
+    """
+    load mbar data from pickle file
+
+    This data was obtained by running this function get_time_series_multiwindow_mbar()
+    from here "a3fe/analyse/process_grads.py" on this data "data_for_mbar.pkl"
+    """
+    mbar_pickle_path = test_data_dir / "data_for_detect_equil.pkl"
     with open(mbar_pickle_path, 'rb') as f:
         return pickle.load(f)
 
@@ -100,7 +112,6 @@ def test_get_time_series_multiwindow(lambda_windows_data):
         MockLambdaWindow(0.500, lam_val_weight=0.3125),
         MockLambdaWindow(1.000, lam_val_weight=0.25),
     ]
-
     overall_dgs, overall_times = detector._get_time_series_multiwindow(
         lambda_windows=lambda_windows, run_nos=[1, 2]
     )
@@ -140,7 +151,6 @@ def test_compute_dg_mbar_with_start_frac_zero(mocker, data_for_running_mbar):
         temperature=298.15,
         units="kcal",
     )
-
     assert pytest.approx(1.5087, rel=0.001) == result
 
 
@@ -174,7 +184,6 @@ def test_compute_dg_mbar_with_start_frac_nonzero(mocker, data_for_running_mbar):
         temperature=298.15,
         units="kcal",
     )
-
     assert pytest.approx(1.2491, rel=0.001) == result
 
 
@@ -202,7 +211,7 @@ def test_get_time_series_multiwindow_mbar_zero(mocker, data_for_running_mbar):
         "equilibrium_detecter._load_alchemical_data_for_run",
         return_value=data_for_running_mbar,
     )
-    overall_dgs, _ = detector._get_time_series_multiwindow_mbar(
+    overall_dgs, overall_times = detector._get_time_series_multiwindow_mbar(
         lambda_windows=lambda_windows,
         run_nos=[1],
         start_frac=0.0,
@@ -244,3 +253,38 @@ def test_get_time_series_multiwindow_mbar_nonzero(mocker, data_for_running_mbar)
         use_multiprocessing=False,
     )
     assert pytest.approx(1.249191, rel=0.001) == overall_dgs.mean(axis=0)[-1]
+
+
+def test_detect_paired_t_based(mocker, data_for_detecting_equil):
+    """
+    Test the _get_time_series_multiwindow_mbar() method against reference values.
+
+    This test loads pickle data, creates mock objects, calls the method,
+    and compares the mean of overall_dgs and overall_times to expected values.
+    """
+    detector = EquilibriumMultiwindowDetector(method="paired_t")
+
+    overall_dgs = data_for_detecting_equil["overall_dgs"]
+    overall_times = data_for_detecting_equil["overall_times"]
+
+    # This setting is based on data from test_data "lambda_windows_data.pkl"
+    lambda_windows = [
+        MockLambdaWindow(0.000, lam_val_weight=0.0625),
+        MockLambdaWindow(0.125, lam_val_weight=0.125),
+        MockLambdaWindow(0.250, lam_val_weight=0.125),
+        MockLambdaWindow(0.375, lam_val_weight=0.125),
+        MockLambdaWindow(0.500, lam_val_weight=0.3125),
+        MockLambdaWindow(1.000, lam_val_weight=0.25),
+    ]
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch(
+        "binding_affinity_predicting.components.analysis."
+        "equilibrium_detecter.EquilibriumMultiwindowDetector._get_time_series_multiwindow_mbar",
+        return_value=(overall_dgs, overall_times),
+    )
+    equilibrated, fractional_equil_time = detector._detect_paired_t_based(
+        lambda_windows=lambda_windows, run_nos=[1]
+    )
+    print(
+        f"equilibrated: {equilibrated}, fractional_equil_time: {fractional_equil_time}"
+    )

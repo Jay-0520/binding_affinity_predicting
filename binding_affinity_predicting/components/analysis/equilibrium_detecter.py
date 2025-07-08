@@ -420,81 +420,6 @@ class EquilibriumMultiwindowDetector:
             logger.error(f"Multi-window equilibrium detection failed: {e}")
             return False, None
 
-    def _detect_paired_t_based(
-        self,
-        lambda_windows: list[LambdaWindow],
-        run_nos: Optional[list[int]] = None,
-        output_dir: Optional[str] = None,
-    ) -> tuple[bool, Optional[float]]:
-        """
-        Paired t-test based detection - exact implementation from a3fe.
-        """
-        from scipy import stats
-
-        if run_nos is None:
-            run_nos = list(range(1, lambda_windows[0].ensemble_size + 1))
-
-        # Initialize results storage
-        p_vals_and_times = []
-        equilibrated = False
-        fractional_equil_time = None
-        equil_time = None
-
-        # Calculate test intervals
-        start_fracs = np.linspace(0, 1 - self.last_frac, num=self.intervals)
-
-        for start_frac in start_fracs:
-            # Get time series data using MBAR-like approach
-            overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
-                lambda_windows, run_nos, start_frac  # Pass lambda_windows directly
-            )
-
-            # Calculate slice indices
-            first_slice_end_idx = round(self.first_frac * len(overall_dgs[0]))
-            last_slice_start_idx = round((1 - self.last_frac) * len(overall_dgs[0]))
-
-            # Extract slices
-            first_slice = overall_dgs[:, :first_slice_end_idx]
-            last_slice = overall_dgs[:, last_slice_start_idx:]
-
-            # Calculate means for each run
-            first_slice_means = np.mean(first_slice, axis=1)
-            last_slice_means = np.mean(last_slice, axis=1)
-
-            # Perform paired t-test
-            _, p_value = stats.ttest_rel(
-                first_slice_means, last_slice_means, alternative="two-sided"
-            )
-
-            # Store results
-            p_vals_and_times.append((p_value, overall_times[0][0]))
-
-            # Check if equilibrated
-            if p_value > self.p_cutoff and not equilibrated:
-                equilibrated = True
-                fractional_equil_time = start_frac
-                equil_time = overall_times[0][0]
-
-        # Update lambda window attributes if equilibrated
-        if equilibrated:
-            for lam_win in lambda_windows:
-                lam_win._equilibrated = True
-                lam_win._equil_time = fractional_equil_time * lam_win.get_tot_simtime(
-                    [1]
-                )
-
-        if output_dir is not None:
-            self._save_paired_t_results(
-                output_dir,
-                equilibrated,
-                p_vals_and_times,
-                fractional_equil_time,
-                equil_time,
-                run_nos,
-            )
-
-        return equilibrated, fractional_equil_time
-
     def _get_time_series_multiwindow(
         self,
         lambda_windows: List[LambdaWindow],
@@ -758,6 +683,81 @@ class EquilibriumMultiwindowDetector:
 
         logger.info("MBAR time series computation completed")
         return overall_dgs, overall_times
+
+    def _detect_paired_t_based(
+        self,
+        lambda_windows: list[LambdaWindow],
+        run_nos: Optional[list[int]] = None,
+        output_dir: Optional[str] = None,
+    ) -> tuple[bool, Optional[float]]:
+        """
+        Paired t-test based detection - exact implementation from a3fe.
+        """
+        from scipy import stats
+
+        if run_nos is None:
+            run_nos = list(range(1, lambda_windows[0].ensemble_size + 1))
+
+        # Initialize results storage
+        p_vals_and_times = []
+        equilibrated = False
+        fractional_equil_time = None
+        equil_time = None
+
+        # Calculate test intervals
+        start_fracs = np.linspace(0, 1 - self.last_frac, num=self.intervals)
+
+        for start_frac in start_fracs:
+            # Get time series data using MBAR-like approach
+            overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
+                lambda_windows, run_nos, start_frac  # Pass lambda_windows directly
+            )
+
+            # Calculate slice indices
+            first_slice_end_idx = round(self.first_frac * len(overall_dgs[0]))
+            last_slice_start_idx = round((1 - self.last_frac) * len(overall_dgs[0]))
+
+            # Extract slices
+            first_slice = overall_dgs[:, :first_slice_end_idx]
+            last_slice = overall_dgs[:, last_slice_start_idx:]
+
+            # Calculate means for each run
+            first_slice_means = np.mean(first_slice, axis=1)
+            last_slice_means = np.mean(last_slice, axis=1)
+
+            # Perform paired t-test
+            _, p_value = stats.ttest_rel(
+                first_slice_means, last_slice_means, alternative="two-sided"
+            )
+
+            # Store results
+            p_vals_and_times.append((p_value, overall_times[0][0]))
+
+            # Check if equilibrated
+            if p_value > self.p_cutoff and not equilibrated:
+                equilibrated = True
+                fractional_equil_time = start_frac
+                equil_time = overall_times[0][0]
+
+        # Update lambda window attributes if equilibrated
+        if equilibrated:
+            for lam_win in lambda_windows:
+                lam_win._equilibrated = True
+                lam_win._equil_time = fractional_equil_time * lam_win.get_tot_simtime(
+                    [1]
+                )
+
+        if output_dir is not None:
+            self._save_paired_t_results(
+                output_dir,
+                equilibrated,
+                p_vals_and_times,
+                fractional_equil_time,
+                equil_time,
+                run_nos,
+            )
+
+        return equilibrated, fractional_equil_time
 
     def _detect_gradient_based(
         self, leg: Leg, run_nos: Optional[list[int]] = None
