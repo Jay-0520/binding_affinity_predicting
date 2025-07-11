@@ -8,8 +8,6 @@ existing GROMACS orchestration system.
 
 import logging
 import multiprocessing as mp
-import os
-from multiprocessing import get_context
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -547,7 +545,7 @@ class EquilibriumMultiwindowDetector:
 
         Returns
         -------
-        Tuple[np.ndarray, np.ndarray]
+        tuple[np.ndarray, np.ndarray]
             (overall_dgs, overall_times) arrays with shape (n_runs, n_points)
             overall_dgs contains cumulative free energy changes
             overall_times contains corresponding simulation times
@@ -706,7 +704,9 @@ class EquilibriumMultiwindowDetector:
 
         # Calculate test intervals
         start_fracs = np.linspace(0, 1 - self.last_frac, num=self.intervals)
-
+        logger.info(
+            f"Running paired t-test for {len(start_fracs)} intervals: {start_fracs}"
+        )
         for start_frac in start_fracs:
             # Get time series data using MBAR-like approach
             overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
@@ -730,7 +730,6 @@ class EquilibriumMultiwindowDetector:
                 first_slice_means, last_slice_means, alternative="two-sided"
             )
 
-            # Store results
             p_vals_and_times.append((p_value, overall_times[0][0]))
 
             # Check if equilibrated
@@ -749,12 +748,12 @@ class EquilibriumMultiwindowDetector:
 
         if output_dir is not None:
             self._save_paired_t_results(
-                output_dir,
-                equilibrated,
-                p_vals_and_times,
-                fractional_equil_time,
-                equil_time,
-                run_nos,
+                output_dir=output_dir,
+                equilibrated=equilibrated,
+                p_vals_and_times=p_vals_and_times,
+                fractional_equil_time=fractional_equil_time,
+                equil_time=equil_time,
+                run_nos=run_nos,
             )
 
         return equilibrated, fractional_equil_time
@@ -864,15 +863,16 @@ class EquilibriumMultiwindowDetector:
 
     def _save_paired_t_results(
         self,
-        leg: Leg,
         equilibrated: bool,
-        p_vals_and_times: List[Tuple[float, float]],
+        output_dir: str,
+        p_vals_and_times: list[tuple[float, float]],
         fractional_equil_time: Optional[float],
         equil_time: Optional[float],
-        run_nos: List[int],
+        run_nos: list[int],
+        leg: Optional[Leg] = None,
     ):
         """Save paired t-test results to file."""
-        output_file = Path(leg.output_dir) / "check_equil_multiwindow_paired_t.txt"
+        output_file = Path(output_dir) / "check_equil_multiwindow_paired_t.txt"
 
         with open(output_file, 'w') as f:
             f.write(f"Equilibrated: {equilibrated}\n")

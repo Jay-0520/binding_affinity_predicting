@@ -51,14 +51,19 @@ class MockLambdaWindow:
         lam_state: float,
         lam_val_weight: float,
         ensemble_size: int = 5,
+        tot_simtime=1000.0,
         output_dir: str = None,
     ):
         self.lam_state = lam_state
         self.lam_val_weight = lam_val_weight
         self.ensemble_size = ensemble_size
+        self._tot_simtime = tot_simtime
         if output_dir is None:
             output_dir = os.getcwd()
         self.output_dir = output_dir
+
+    def get_tot_simtime(self, run_nos):
+        return self._tot_simtime
 
 
 class MockGradientAnalyzer:
@@ -128,6 +133,7 @@ def test_compute_dg_mbar_with_start_frac_zero(mocker, data_for_running_mbar):
     The reference value was computed by subjecting the same data to a3fe _compute_dg() from
     https://github.com/michellab/a3fe/blob/main/a3fe/analyse/process_grads.py  _compute_dg()
     """
+    # This setting is based on data from test_data "lambda_windows_data.pkl"
     lambda_windows = [
         MockLambdaWindow(0.000, lam_val_weight=0.0625),
         MockLambdaWindow(0.125, lam_val_weight=0.125),
@@ -161,6 +167,7 @@ def test_compute_dg_mbar_with_start_frac_nonzero(mocker, data_for_running_mbar):
     The reference value was computed by subjecting the same data to a3fe _compute_dg() from
     https://github.com/michellab/a3fe/blob/main/a3fe/analyse/process_grads.py  _compute_dg()
     """
+    # This setting is based on data from test_data "lambda_windows_data.pkl"
     lambda_windows = [
         MockLambdaWindow(0.000, lam_val_weight=0.0625),
         MockLambdaWindow(0.125, lam_val_weight=0.125),
@@ -211,7 +218,7 @@ def test_get_time_series_multiwindow_mbar_zero(mocker, data_for_running_mbar):
         "equilibrium_detecter._load_alchemical_data_for_run",
         return_value=data_for_running_mbar,
     )
-    overall_dgs, overall_times = detector._get_time_series_multiwindow_mbar(
+    overall_dgs, _ = detector._get_time_series_multiwindow_mbar(
         lambda_windows=lambda_windows,
         run_nos=[1],
         start_frac=0.0,
@@ -262,10 +269,17 @@ def test_detect_paired_t_based(mocker, data_for_detecting_equil):
     This test loads pickle data, creates mock objects, calls the method,
     and compares the mean of overall_dgs and overall_times to expected values.
     """
-    detector = EquilibriumMultiwindowDetector(method="paired_t")
+    detector = EquilibriumMultiwindowDetector(method="paired_t", intervals=10)
 
-    overall_dgs = data_for_detecting_equil["overall_dgs"]
-    overall_times = data_for_detecting_equil["overall_times"]
+    start_fracs = np.linspace(0, 1 - detector.last_frac, num=detector.intervals)
+
+    def mock_get_time_series_side_effect_indexed(lambda_windows, run_nos, start_frac):
+        """Return data based on start_frac index"""
+        frac_index = np.argmin(np.abs(start_fracs - start_frac))
+        return (
+            data_for_detecting_equil["overall_dgs"][frac_index],
+            data_for_detecting_equil["overall_times"][frac_index],
+        )
 
     # This setting is based on data from test_data "lambda_windows_data.pkl"
     lambda_windows = [
@@ -280,11 +294,11 @@ def test_detect_paired_t_based(mocker, data_for_detecting_equil):
     mocker.patch(
         "binding_affinity_predicting.components.analysis."
         "equilibrium_detecter.EquilibriumMultiwindowDetector._get_time_series_multiwindow_mbar",
-        return_value=(overall_dgs, overall_times),
+        side_effect=mock_get_time_series_side_effect_indexed,
     )
     equilibrated, fractional_equil_time = detector._detect_paired_t_based(
-        lambda_windows=lambda_windows, run_nos=[1]
+        lambda_windows=lambda_windows,
+        run_nos=[1, 2, 3, 4, 5],
     )
-    print(
-        f"equilibrated: {equilibrated}, fractional_equil_time: {fractional_equil_time}"
-    )
+    assert equilibrated is True
+    assert fractional_equil_time == pytest.approx(0.0, rel=0.01)
