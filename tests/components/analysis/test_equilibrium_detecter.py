@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from binding_affinity_predicting.components.analysis.equilibrium_detecter import (
+    EquilibriumBlockGradientDetector,
     EquilibriumMultiwindowDetector,
     _compute_dg_mbar,
 )
@@ -37,9 +38,25 @@ def data_for_detecting_equil(test_data_dir) -> dict:
 
     This data was obtained by running this function get_time_series_multiwindow_mbar()
     from here "a3fe/analyse/process_grads.py" on this data "data_for_mbar.pkl"
+
+    This data contains the overall_dgs and overall_times for 10 intervals
+    with start_frac defined start_fracs = np.linspace(0, 1 - self.last_frac, num=self.intervals)
+    where last_frac = 0.5 by default
     """
     mbar_pickle_path = test_data_dir / "data_for_detect_equil.pkl"
     with open(mbar_pickle_path, 'rb') as f:
+        return pickle.load(f)
+
+
+@pytest.fixture(scope="module")
+def gradient_data(test_data_dir) -> list[np.ndarray]:
+    """
+    Gradient data for a single run (lam_windows[3] and run_nos=[1]).
+
+    This is same as the data used in test_per_window_equilibration_detection() from A3FE
+    """
+    gradient_pickle_path = test_data_dir / "gradient_data_one_run.pkl"
+    with open(gradient_pickle_path, 'rb') as f:
         return pickle.load(f)
 
 
@@ -264,10 +281,7 @@ def test_get_time_series_multiwindow_mbar_nonzero(mocker, data_for_running_mbar)
 
 def test_detect_paired_t_based(mocker, data_for_detecting_equil):
     """
-    Test the _get_time_series_multiwindow_mbar() method against reference values.
-
-    This test loads pickle data, creates mock objects, calls the method,
-    and compares the mean of overall_dgs and overall_times to expected values.
+    Test the _detect_paired_t_based() method against reference values.
     """
     detector = EquilibriumMultiwindowDetector(method="paired_t", intervals=10)
 
@@ -302,3 +316,38 @@ def test_detect_paired_t_based(mocker, data_for_detecting_equil):
     )
     assert equilibrated is True
     assert fractional_equil_time == pytest.approx(0.0, rel=0.01)
+
+
+def test_equilibriumblockgradientdetector_detect_equilibrium(mocker, gradient_data):
+    """
+    gradient_data contains gradient data for a single run
+
+    0.0024 is the reference value for equilibration time
+    This test is based on the test_per_window_equilibration_detection() from A3FE
+    """
+
+    detector = EquilibriumBlockGradientDetector(
+        block_size=0.05, gradient_threshold=None
+    )
+    # This setting is based on data from test_data "lambda_windows_data.pkl"
+    lambda_windows = [
+        MockLambdaWindow(0.000, lam_val_weight=0.0625),
+        MockLambdaWindow(0.125, lam_val_weight=0.125),
+        MockLambdaWindow(0.250, lam_val_weight=0.125),
+        MockLambdaWindow(0.375, lam_val_weight=0.125),
+        MockLambdaWindow(0.500, lam_val_weight=0.3125),
+        MockLambdaWindow(1.000, lam_val_weight=0.25),
+    ]
+
+    formatted_gradient_data = ([gradient_data['times']], [gradient_data['gradients']])
+    mocker.patch(
+        "binding_affinity_predicting.components.analysis."
+        "equilibrium_detecter.GradientAnalyzer.read_gradients_from_window",
+        return_value=formatted_gradient_data,
+    )
+
+    equilibrated, equil_time = detector.detect_equilibrium(
+        window=lambda_windows[3], run_nos=[1]
+    )
+    assert equilibrated is True
+    assert equil_time == pytest.approx(0.0024, rel=0.01)

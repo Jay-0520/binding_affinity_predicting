@@ -12,12 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import scipy.stats as stats
-from statsmodels.tsa.stattools import kpss
 
-from binding_affinity_predicting.components.analysis.autocorrelation import (
-    _statistical_inefficiency_chodera,
-)
 from binding_affinity_predicting.components.analysis.free_energy_estimators import (
     FreeEnergyEstimator,
 )
@@ -25,7 +20,6 @@ from binding_affinity_predicting.components.analysis.gradient_analyzer import (
     GradientAnalyzer,
 )
 from binding_affinity_predicting.components.analysis.xvg_data_loader import (
-    GromacsXVGParser,
     load_alchemical_data,
 )
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
@@ -38,16 +32,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class EquilibriumDetectionError(Exception):
-    """Custom exception for equilibrium detection errors."""
-
-    pass
-
-
 class EquilibriumBlockGradientDetector:
     """
     Equilibrium detection based on gradient of block-averaged dH/dλ.
-    Adapted from check_equil_block_gradient in a3fe.
+    Adapted from check_equil_block_gradient() in a3fe.
     (https://github.com/michellab/a3fe)
     """
 
@@ -68,8 +56,8 @@ class EquilibriumBlockGradientDetector:
         self.gradient_analyzer = GradientAnalyzer()
 
     def detect_equilibrium(
-        self, window: LambdaWindow, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self, window: LambdaWindow, run_nos: Optional[list[int]] = None
+    ) -> tuple[bool, Optional[float]]:
         """
         Detect equilibrium using block gradient method.
 
@@ -86,8 +74,10 @@ class EquilibriumBlockGradientDetector:
 
             # Calculate timestep from times array
             if len(times[0]) < 2:
-                raise EquilibriumDetectionError("Insufficient data points")
+                raise ValueError("Insufficient data points")
 
+            # calculate number of indices in a block, functionally same as what
+            # in A3FE's check_equil_block_gradient()
             timestep = times[0][1] - times[0][0]  # ns
             idx_block_size = int(self.block_size / timestep)
 
@@ -95,12 +85,13 @@ class EquilibriumBlockGradientDetector:
             gradient_derivatives = []
             for run_gradients in gradients:
                 d_dh_dl = self._calculate_gradient_derivative(
-                    run_gradients, idx_block_size
+                    gradients=run_gradients, idx_block_size=idx_block_size
                 )
                 gradient_derivatives.append(d_dh_dl)
 
             # Calculate mean gradient derivative
-            mean_gradient_derivative = np.nanmean(gradient_derivatives, axis=0)
+            # TODO: should we use np.nanmean here?
+            mean_gradient_derivative = np.mean(gradient_derivatives, axis=0)
 
             # Detect equilibration
             equilibrated, equil_time = self._find_equilibration_point(
@@ -122,9 +113,10 @@ class EquilibriumBlockGradientDetector:
         """Calculate derivative of block-averaged gradients."""
         d_dh_dl = np.full(len(gradients), np.nan)
 
-        # Calculate rolling average
-        rolling_avg = self._get_rolling_average(gradients, idx_block_size)
-
+        # Calculate rolling average of gradients
+        rolling_avg = self._get_rolling_average(
+            data=gradients, window_size=idx_block_size
+        )
         # Calculate derivative
         for i in range(len(gradients)):
             if i < 2 * idx_block_size:
@@ -137,6 +129,11 @@ class EquilibriumBlockGradientDetector:
 
     def _get_rolling_average(self, data: np.ndarray, window_size: int) -> np.ndarray:
         """Calculate rolling average with specified window size."""
+        if window_size > len(data):
+            raise ValueError(
+                "Block size cannot be larger than the length of the data array."
+            )
+
         rolling_avg = np.full(len(data), np.nan)
 
         for i in range(len(data)):
@@ -148,18 +145,18 @@ class EquilibriumBlockGradientDetector:
 
     def _find_equilibration_point(
         self, times: np.ndarray, gradient_derivative: np.ndarray, idx_block_size: int
-    ) -> Tuple[bool, Optional[float]]:
-        """Find the equilibration point based on gradient criteria."""
+    ) -> tuple[bool, Optional[float]]:
+        """Find the equilibration point based on gradient criteria.
+
+        Returns True if equilibrated, False otherwise, and the equilibration time if found.
+        """
         start_idx = 2 * idx_block_size
 
         if start_idx >= len(gradient_derivative):
             return False, None
 
         last_grad = gradient_derivative[start_idx]
-
-        for i in range(start_idx, len(gradient_derivative)):
-            grad = gradient_derivative[i]
-
+        for i, grad in enumerate(gradient_derivative[start_idx:]):
             if np.isnan(grad):
                 continue
 
@@ -759,107 +756,31 @@ class EquilibriumMultiwindowDetector:
         return equilibrated, fractional_equil_time
 
     def _detect_gradient_based(
-        self, leg: Leg, run_nos: Optional[list[int]] = None
+        self, lambda_windows: list[LambdaWindow], run_nos: Optional[list[int]] = None
     ) -> tuple[bool, Optional[float]]:
         """Gradient-based multi-window detection."""
-        # Simplified gradient-based approach
-        for discard_fraction in [0.0, 0.1, 0.3, 0.6]:
-            try:
-                overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
-                    leg.lambda_windows, run_nos or list(range(1, 6)), discard_fraction
-                )
-
-                # Simple test: check if gradient variance decreases
-                if len(overall_dgs) > 0 and len(overall_dgs[0]) > 10:
-                    # Calculate gradient of cumulative free energy
-                    mean_dgs = np.mean(overall_dgs, axis=0)
-                    gradients = np.gradient(mean_dgs)
-
-                    # Check if latter half has lower variance than first half
-                    mid_point = len(gradients) // 2
-                    first_half_var = np.var(gradients[:mid_point])
-                    second_half_var = np.var(gradients[mid_point:])
-
-                    if second_half_var < 0.5 * first_half_var:  # Arbitrary threshold
-                        return True, discard_fraction
-
-            except Exception as e:
-                logger.warning(
-                    f"Gradient test failed for fraction {discard_fraction}: {e}"
-                )
-                continue
-
-        return False, None
+        raise NotImplementedError(
+            "Gradient-based detection is not implemented yet. "
+            "Please use another method like 'paired_t' or 'kpss'."
+        )
 
     def _detect_kpss_based(
-        self, leg: Leg, run_nos: Optional[list[int]] = None
+        self, lambda_windows: list[LambdaWindow], run_nos: Optional[list[int]] = None
     ) -> tuple[bool, Optional[float]]:
         """KPSS stationarity test based detection."""
-        for discard_fraction in [0.0, 0.1, 0.3, 0.5]:
-            try:
-                overall_dgs, _ = self._get_time_series_multiwindow_mbar(
-                    leg.lambda_windows, run_nos or list(range(1, 6)), discard_fraction
-                )
-
-                # Use mean across runs
-                mean_dgs = np.mean(overall_dgs, axis=0)
-
-                if len(mean_dgs) < 10:
-                    continue
-
-                # KPSS test for stationarity
-                _, p_value, *_ = kpss(mean_dgs, regression='c', nlags='auto')
-
-                if p_value > 0.05:  # Stationary (null hypothesis not rejected)
-                    return True, discard_fraction
-
-            except Exception as e:
-                logger.warning(f"KPSS test failed for fraction {discard_fraction}: {e}")
-                continue
-
-        return False, None
+        raise NotImplementedError(
+            "KPSS-based detection is not implemented yet. "
+            "Please use another method like 'paired_t' or 'gradient'."
+        )
 
     def _detect_geweke_based(
-        self, leg: Leg, run_nos: Optional[list[int]] = None
+        self, lambda_windows: list[LambdaWindow], run_nos: Optional[list[int]] = None
     ) -> tuple[bool, Optional[float]]:
         """Modified Geweke test based detection."""
-        from scipy import stats
-
-        for discard_fraction in np.linspace(0, 1 - self.last_frac, self.intervals):
-            try:
-                overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
-                    leg.lambda_windows, run_nos or list(range(1, 6)), discard_fraction
-                )
-
-                # Calculate slice indices for Geweke test
-                first_slice_end_idx = int(self.first_frac * len(overall_dgs[0]))
-                last_slice_start_idx = int((1 - self.last_frac) * len(overall_dgs[0]))
-
-                # Extract slices for each run
-                first_slice_means = []
-                last_slice_means = []
-
-                for run_dgs in overall_dgs:
-                    first_slice_means.append(np.mean(run_dgs[:first_slice_end_idx]))
-                    last_slice_means.append(np.mean(run_dgs[last_slice_start_idx:]))
-
-                # Use independent samples t-test (Geweke-style)
-                _, p_value = stats.ttest_ind(
-                    first_slice_means,
-                    last_slice_means,
-                    equal_var=False,  # Welch's t-test
-                )
-
-                if p_value > self.p_cutoff:
-                    return True, discard_fraction
-
-            except Exception as e:
-                logger.warning(
-                    f"Geweke test failed for fraction {discard_fraction}: {e}"
-                )
-                continue
-
-        return False, None
+        raise NotImplementedError(
+            "Geweke-based detection is not implemented yet. "
+            "Please use another method like 'paired_t' or 'gradient'."
+        )
 
     def _save_paired_t_results(
         self,
@@ -869,7 +790,6 @@ class EquilibriumMultiwindowDetector:
         fractional_equil_time: Optional[float],
         equil_time: Optional[float],
         run_nos: list[int],
-        leg: Optional[Leg] = None,
     ):
         """Save paired t-test results to file."""
         output_file = Path(output_dir) / "check_equil_multiwindow_paired_t.txt"
@@ -887,12 +807,25 @@ class EquilibriumMultiwindowDetector:
             f.write(f"intervals={self.intervals}, p_cutoff={self.p_cutoff}\n")
 
 
+class EquilibriumChoderDetector:
+    """
+    Chodera-style equilibrium detection based on statistical inefficiency.
+    Adapted from check_equil_chodera in a3fe.
+    """
+
+    def __init__(self, **kwargs):
+        raise NotImplementedError(
+            "Chodera-style equilibrium detection is not implemented yet. "
+            "Please use another method like 'block_gradient' or 'multiwindow'."
+        )
+
+
 class EquilibriumDetectionManager:
     """
     High-level manager for equilibrium detection across different methods.
     """
 
-    def __init__(self, method: str = "block_gradient", **method_kwargs):
+    def __init__(self, method: str = "multiwindow", **method_kwargs):
         """
         Parameters
         ----------
@@ -906,11 +839,11 @@ class EquilibriumDetectionManager:
 
         # Initialize appropriate detector
         if method == "block_gradient":
-            self.detector = BlockGradientDetector(**method_kwargs)
+            self.detector = EquilibriumBlockGradientDetector(**method_kwargs)
         elif method == "chodera":
-            self.detector = ChoderDetector(**method_kwargs)
+            self.detector = EquilibriumChoderDetector(**method_kwargs)
         elif method == "multiwindow":
-            self.detector = MultiwindowDetector(**method_kwargs)
+            self.detector = EquilibriumMultiwindowDetector(**method_kwargs)
         else:
             raise ValueError(f"Unknown method: {method}")
 
@@ -996,9 +929,10 @@ class EquilibriumDetectionManager:
 
     def _estimate_window_total_time(self, window: LambdaWindow) -> float:
         """Estimate total simulation time for a window (simplified)."""
-        # This is a placeholder - in practice you'd read from XVG files
-        # or use information from the simulation setup
-        return 10.0  # ns
+        raise NotImplementedError(
+            "Total time estimation is not implemented. "
+            "Please implement _estimate_window_total_time in the detector."
+        )
 
 
 # Convenience functions for easy usage
