@@ -64,10 +64,14 @@ class SimulationRunner(ABC):
         self._submitted_jobs: list[Job] = []  # For HPC jobs
         self._init_runtime_attributes()
 
+        # Initialize equilibrium detection attributes
+        self._equilibrated: bool = False
+        self._equil_time: Optional[float] = None
+
         ensure_dir_exist(Path(self.input_dir))
         ensure_dir_exist(Path(self.output_dir))
 
-        # (Optional) save initial state if needed
+        # Optional - save initial state if needed
         if save_state_on_init:
             logger.info(
                 f"Saving {self.__class__.__name__} state to "
@@ -265,7 +269,7 @@ class SimulationRunner(ABC):
 
         Returns
         -------
-        tot_simtime : float
+        tot_simulation_time : float
             The total simulation time in ns.
         """
         run_nos = self._get_valid_run_nos(run_nos)
@@ -298,32 +302,6 @@ class SimulationRunner(ABC):
                 for sub_sim_runner in self._sub_sim_runners
             ]
         )
-
-    @property
-    def tot_simtime(self) -> float:
-        """
-        The total simulation time in ns for the {self.__class__.__name__} and
-        any sub-simulation runners.
-        """
-        return sum(
-            [
-                sub_sim_runner.get_tot_simulation_time()
-                for sub_sim_runner in self._sub_sim_runners
-            ]
-        )  # ns
-
-    @property
-    def tot_gpu_time(self) -> float:
-        """
-        The total simulation time in GPU hours for the {self.__class__.__name__}
-        and any sub-simulation runners.
-        """
-        return sum(
-            [
-                sub_sim_runner.get_tot_gpu_time()
-                for sub_sim_runner in self._sub_sim_runners
-            ]
-        )  # GPU hours
 
     def is_equilibrated(self, run_nos: Optional[list[int]] = None) -> bool:
         """

@@ -95,3 +95,14 @@ def lambda_data() -> tuple:
     p = TEST_DATA_DIR / "lambda_data.pkl"
     with open(p, "rb") as f:
         return pickle.load(f)
+
+
+@pytest.fixture(scope="module")
+def lambda_windows_data() -> tuple:
+    """
+    Load the pickled FEP data once per test session (or skip if missing).
+    Uses the TEST_DATA_DIR defined above.
+    """
+    p = TEST_DATA_DIR / "lambda_windows_data.pkl"
+    with open(p, "rb") as f:
+        return pickle.load(f)

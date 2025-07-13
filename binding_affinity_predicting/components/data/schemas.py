@@ -419,5 +419,5 @@ class BaseWorkflowConfig(BaseModel):
         extra = "forbid"
         validate_assignment = True
 
-    def get_tot_simtime(self, n_runs: int, leg_type: LegType) -> float:
+    def get_tot_simulation_time(self, n_runs: int, leg_type: LegType) -> float:
         raise NotImplementedError("...")

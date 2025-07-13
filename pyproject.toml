@@ -29,6 +29,7 @@ Repository = "https://github.com/Jay-0520/binding_affinity_predicting"
 test = [
   "pytest>=6.1.2",
   "pytest-runner",
+  "pytest-mock",
 ]
 docs = [
     "sphinx<7.0.0",
@@ -39,6 +40,7 @@ dev = [
     "isort>=5.10.0",
     "pytest>=6.1.2",
     "pytest-runner",
+    "pytest-mock",
     "black",
     "flake8",
     "mypy",
