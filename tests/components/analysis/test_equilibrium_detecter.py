@@ -1,6 +1,7 @@
 import logging
 import os
 import pickle
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -69,7 +70,7 @@ class MockLambdaWindow:
         lam_val_weight: float,
         ensemble_size: int = 5,
         tot_simtime=1000.0,
-        output_dir: str = None,
+        output_dir: Optional[str] = None,
     ):
         self.lam_state = lam_state
         self.lam_val_weight = lam_val_weight
@@ -79,7 +80,7 @@ class MockLambdaWindow:
             output_dir = os.getcwd()
         self.output_dir = output_dir
 
-    def get_tot_simtime(self, run_nos):
+    def get_tot_simulation_time(self, run_nos):
         return self._tot_simtime
 
 
@@ -347,7 +348,7 @@ def test_equilibriumblockgradientdetector_detect_equilibrium(mocker, gradient_da
     )
 
     equilibrated, equil_time = detector.detect_equilibrium(
-        window=lambda_windows[3], run_nos=[1]
+        target=lambda_windows[3], run_nos=[1]
     )
     assert equilibrated is True
     assert equil_time == pytest.approx(0.0024, rel=0.01)

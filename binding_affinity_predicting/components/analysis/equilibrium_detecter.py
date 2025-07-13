@@ -33,7 +33,7 @@ logger.setLevel(logging.INFO)
 
 
 # This function is only used by equilibrium_detecter.py
-def _load_alchemical_data_for_equil_detect(
+def _load_alchemical_data_for_run(
     lambda_windows: list[LambdaWindow],
     run_no: int,
     temperature: float = 298.15,
@@ -114,7 +114,7 @@ def _compute_dg_mbar(
     """
     try:
         # Load data for this run
-        alchemical_data = _load_alchemical_data_for_equil_detect(
+        alchemical_data = _load_alchemical_data_for_run(
             lambda_windows=lambda_windows,
             run_no=run_no,
             temperature=temperature,
