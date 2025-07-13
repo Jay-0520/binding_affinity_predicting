@@ -7,6 +7,8 @@ from pathlib import Path
 from time import sleep
 from typing import Optional
 
+import numpy as np
+
 from binding_affinity_predicting.components.data.enums import JobStatus
 from binding_affinity_predicting.components.simulation_fep.utils import (
     ensure_dir_exist,
@@ -273,7 +275,7 @@ class SimulationRunner(ABC):
             The total simulation time in ns.
         """
         run_nos = self._get_valid_run_nos(run_nos)
-        return sum(
+        return np.nansum(
             [
                 sub_sim_runner.get_tot_simulation_time(run_nos=run_nos)
                 for sub_sim_runner in self._sub_sim_runners

@@ -14,6 +14,9 @@ from binding_affinity_predicting.components.simulation_base.slurm_parameters imp
     SlurmSubmitGenerator,
     create_custom_slurm_generator,
 )
+from binding_affinity_predicting.components.simulation_base.utils import (
+    parse_simulation_time_from_log,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,6 @@ class Simulation:
         extra_params: Optional[dict[str, Any]] = None,
         mdp_generator: Optional[MDPGenerator] = None,
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
-        # runtime_ns: Optional[float] = None,
         mdp_overrides: Optional[dict[str, Union[str, int, float]]] = None,
     ) -> None:
         """
@@ -70,7 +72,7 @@ class Simulation:
             MDP file generator. If None, uses default.
         slurm_generator : SlurmSubmitGenerator, optional
             SLURM script generator. If None, uses default.
-        runtime_ns : float, optional
+        runtime_ns : float, optional [REMOVED]
             Simulation runtime in nanoseconds
         mdp_overrides : Dict, optional
             Custom MDP parameter overrides
@@ -88,7 +90,6 @@ class Simulation:
         self.coul_list = list(coul_list)
         self.vdw_list = list(vdw_list)
         self.extra_params = extra_params or {}
-        # self.runtime_ns = runtime_ns
         self.mdp_overrides = mdp_overrides or {}
 
         # Initialize Pydantic-based generators
@@ -280,7 +281,7 @@ class Simulation:
         elif runtime is not None:
             # File exists but have new runtime - regenerate
             logger.info(
-                f"👍 Regenerating MDP file for λ={self.lam_state} with runtime {runtime} ns"
+                f"Regenerating MDP file for λ={self.lam_state} with runtime {runtime} ns"
             )
             self.mdp_generator.write_mdp_file(
                 output_path=self.mdp_file,
@@ -288,7 +289,7 @@ class Simulation:
                 bonded_lambdas=self.bonded_list,
                 coul_lambdas=self.coul_list,
                 vdw_lambdas=self.vdw_list,
-                runtime_ns=runtime,  # ← Use updated runtime
+                runtime_ns=runtime,  # Important -> Use updated runtime
                 # we must omit custom_overrides here
             )
             self.setup_time = datetime.now()
@@ -335,6 +336,7 @@ class Simulation:
             "-deffnm",
             f"lambda_{self.lam_state}_run_{self.run_index}",
             "-cpi",
+            # TODO: do we need this? how does this affect restarting a previous run?
             # this always works even if the cpt file does not exist
             f"lambda_{self.lam_state}_run_{self.run_index}.cpt",
         ]
@@ -359,10 +361,12 @@ class Simulation:
         self._running = False
         self.end_time = datetime.now()
 
+    # TODO: do we need this?
     @property
     def failed_simulations(self) -> list["Simulation"]:
         return [self] if self._failed else []
 
+    # TODO: do we need this?
     @property
     def runtime_seconds(self) -> float:
         """Get runtime in seconds."""
@@ -438,3 +442,41 @@ class Simulation:
             f"Simulation[λ={self.lam_state}, run={self.run_index}, "
             f"dir={self.work_dir.name}, finished={self._finished}]"
         )
+
+    def get_tot_simulation_time(self, run_nos: Optional[list[int]] = None) -> float:
+        """
+        Get the total simulation time in ns for this simulation.
+
+        Parameters
+        ----------
+        run_nos : List[int], Optional, default=None
+            A list of the run numbers to analyse. For a single Simulation,
+            this should contain only this simulation's run_index if provided.
+
+        Returns
+        -------
+        tot_simulation_time : float
+            The total simulation time in (ns) for this simulation.
+        """
+        # Check if this simulation's run is requested
+        if run_nos is not None and self.run_index not in run_nos:
+            return 0.0
+
+        # Return simulation time if finished, otherwise None
+        if self._finished:
+            # parse from GROMACS log files or calculate based on actual execution
+            log_file = (
+                self.work_dir / f"lambda_{self.lam_state}_run_{self.run_index}.log"
+            )
+
+            if log_file.exists():
+                try:
+                    return parse_simulation_time_from_log(str(log_file))
+                except Exception:
+                    logger.error(
+                        f"Failed to parse simulation time from log file: {log_file}"
+                    )
+            # if log file does not exist or parsing fails
+            return 0.0
+
+        return 0.0

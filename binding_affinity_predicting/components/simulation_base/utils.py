@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -309,3 +310,62 @@ def check_has_wat_and_box(system: BSS._SireWrappers._system.System) -> None:
         raise ValueError("System does not have a box.")
     if system.nWaterMolecules() == 0:
         raise ValueError("System does not have water.")
+
+
+def parse_simulation_time_from_log(log_file: str) -> float:
+    """
+    Parse the actual simulation time from a GROMACS log.
+
+    Scans for each "Step    Time" table and picks up every timestep/time entry,
+    then also checks for the checkpoint "time:" line, keeping the last value seen.
+    Returns the final time in nanoseconds.
+    """
+    # Regex to detect the table header
+    header_re = re.compile(r'^\s*Step\s+Time', re.IGNORECASE)
+    # Regex to grab lines like "    5000    10.00000"
+    table_line_re = re.compile(r'^\s*\d+\s+([0-9]+(?:\.[0-9]*)?)')
+    # Regex to grab checkpoint time lines like "  time:                  10.000000"
+    cpt_time_re = re.compile(r'^\s*time:\s*([0-9]+(?:\.[0-9]*)?)\s*$', re.IGNORECASE)
+
+    last_time_ps = None
+    in_table = False
+
+    try:
+        with open(log_file, 'r') as f:
+            for line in f:
+                # If we see the table header, (re)enter table mode
+                if header_re.match(line):
+                    in_table = True
+                    continue
+
+                # While in the table, try to match rows
+                if in_table:
+                    m = table_line_re.match(line)
+                    if m:
+                        try:
+                            last_time_ps = float(m.group(1))
+                        except ValueError:
+                            logger.debug(f"Couldn’t parse table time “{m.group(1)}”")
+                        continue
+                    else:
+                        # Any non-row line means the table ended
+                        in_table = False
+
+                # Independently, also catch checkpoint time: lines
+                m2 = cpt_time_re.match(line)
+                if m2:
+                    try:
+                        last_time_ps = float(m2.group(1))
+                    except ValueError:
+                        logger.debug(f"Couldn’t parse checkpoint time “{m2.group(1)}”")
+                    continue
+
+    except (IOError, OSError) as e:
+        logger.error(f"Could not open log file {log_file}: {e}")
+        return 0.0
+
+    if last_time_ps is None:
+        return 0.0
+
+    # Convert ps → ns
+    return last_time_ps / 1000.0
