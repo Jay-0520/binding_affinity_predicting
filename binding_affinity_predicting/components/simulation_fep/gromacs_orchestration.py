@@ -17,8 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-
 from binding_affinity_predicting.components.data.enums import (
     JobStatus,
     LegType,
@@ -74,8 +72,10 @@ class LambdaWindow(SimulationRunner):
         self.lam_state = lam_state
         self.virtual_queue = virtual_queue
         self.sim_params = sim_params
-        # TODO: need to define a _equil_time
-        self._equil_time = 1_000
+
+        # Lambda weight for multiwindow equilibrium detection
+        # Default to equal weighting if not specified
+        self.lam_val_weight: float = sim_params.get('lam_val_weight', 1.0)
 
         # Initialize Pydantic-based generators
         self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
@@ -666,10 +666,6 @@ class Calculation(SimulationRunner):
             Configuration object containing simulation parameters.
         equil_detection : str, default: "multiwindow"
             Method for detecting equilibration. Options: "multiwindow", "singlewindow".
-        runtime_ns : float, optional, default: 0.001 (ns)
-            Constant runtime for each lambda window. If None, uses sim_config.runtime_ns.
-            when this is provided, it will override the MDP file's `nsteps` parameter.
-            This is useful for testing purposes and for lambda optimization.
         ensemble_size : int, default: 5
             Number of replicas to run for each lambda window.
         virtual_queue : VirtualQueue, optional
@@ -692,7 +688,6 @@ class Calculation(SimulationRunner):
         )
         self.sim_config = sim_config
         self.equil_detection = equil_detection
-        # self.runtime_ns = runtime_ns
 
         # Initialize Pydantic-based generators at the calculation level
         self.mdp_generator = mdp_generator or self._create_default_mdp_generator()
@@ -761,6 +756,12 @@ class Calculation(SimulationRunner):
         ----------
         run_nos : List[int] or None
             If provided, only run those replica indices (1-based) for each lambda.
+
+        runtime_ns : float, optional, default: 0.001 (ns)
+            Constant runtime for each lambda window. If None, uses sim_config.runtime_ns.
+            NOTE: when this is provided, it will override the MDP file's `nsteps` parameter.
+            This is useful for testing purposes and for lambda optimization.
+
         use_hpc : bool
             If True, submit all windows` `submit_gmx.sh` to SLURM (nonblocking).
             If False, run everything locally (blocking).

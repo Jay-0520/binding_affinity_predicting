@@ -9,19 +9,14 @@ existing GROMACS orchestration system.
 import logging
 import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
-from binding_affinity_predicting.components.analysis.free_energy_estimators import (
-    FreeEnergyEstimator,
-)
 from binding_affinity_predicting.components.analysis.gradient_analyzer import (
     GradientAnalyzer,
 )
-from binding_affinity_predicting.components.analysis.xvg_data_loader import (
-    load_alchemical_data,
-)
+from binding_affinity_predicting.components.analysis.utils import _compute_dg_mbar
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
     Calculation,
     LambdaWindow,
@@ -34,6 +29,9 @@ logger.setLevel(logging.INFO)
 
 class EquilibriumBlockGradientDetector:
     """
+    Check if the ensemble of simulations at the lambda window is
+    equilibrated based on the ensemble gradient between averaged blocks.
+
     Equilibrium detection based on gradient of block-averaged dH/dλ.
     Adapted from check_equil_block_gradient() in a3fe.
     (https://github.com/michellab/a3fe)
@@ -56,16 +54,26 @@ class EquilibriumBlockGradientDetector:
         self.gradient_analyzer = GradientAnalyzer()
 
     def detect_equilibrium(
-        self, window: LambdaWindow, run_nos: Optional[list[int]] = None
+        self,
+        target: LambdaWindow,
+        run_nos: Optional[list[int]] = None,
+        save_result: bool = False,
+        **kwargs,
     ) -> tuple[bool, Optional[float]]:
         """
-        Detect equilibrium using block gradient method.
+        Detect equilibrium per single lambda window using block gradient method.
 
         Returns
         -------
         Tuple[bool, Optional[float]]
             (equilibrated, equilibration_time_ns)
         """
+        if isinstance(target, list):
+            raise ValueError(
+                "Block gradient method can only analyze single LambdaWindow, not list"
+            )
+
+        window = target
         try:
             # Read gradient data
             times, gradients = self.gradient_analyzer.read_gradients_from_window(
@@ -99,7 +107,8 @@ class EquilibriumBlockGradientDetector:
             )
 
             # Save results
-            self._save_results(window, equilibrated, equil_time, run_nos)
+            if save_result:
+                self._save_results(window, equilibrated, equil_time, run_nos)
 
             return equilibrated, equil_time
 
@@ -177,7 +186,7 @@ class EquilibriumBlockGradientDetector:
         window: LambdaWindow,
         equilibrated: bool,
         equil_time: Optional[float],
-        run_nos: Optional[List[int]],
+        run_nos: Optional[list[int]],
     ):
         """Save equilibration detection results."""
         output_file = Path(window.output_dir) / "equilibration_block_gradient.txt"
@@ -188,154 +197,6 @@ class EquilibriumBlockGradientDetector:
             f.write(f"Block size: {self.block_size} ns\n")
             f.write(f"Gradient threshold: {self.gradient_threshold}\n")
             f.write(f"Run numbers: {run_nos}\n")
-
-
-def _load_alchemical_data_for_run(
-    lambda_windows: list[LambdaWindow],
-    run_no: int,
-    temperature: float = 298.15,
-    skip_time: float = 0.0,
-    reduce_to_dimensionless: bool = True,
-    use_equilibrated: bool = False,
-) -> dict:
-    xvg_files = []
-    for window in lambda_windows:
-        run_dir = Path(window.output_dir) / f"run_{run_no}"
-        if use_equilibrated:
-            # Look for equilibrated simulation files
-            xvg_file = (
-                run_dir / f"lambda_{window.lam_state}_run_{run_no}_equilibrated.xvg"
-            )
-            # Or however your equilibrated files are named
-        else:
-            xvg_file = run_dir / f"lambda_{window.lam_state}_run_{run_no}.xvg"
-
-        if xvg_file.exists():
-            xvg_files.append(xvg_file)
-        else:
-            logger.warning(f"XVG file not found: {xvg_file}")
-            return None
-
-    if not xvg_files:
-        logger.warning(f"No XVG files found for run {run_no}")
-        return None
-
-    # Load alchemical data
-    alchemical_data = load_alchemical_data(
-        xvg_files=xvg_files,
-        skip_time=skip_time,
-        temperature=temperature,
-        reduce_to_dimensionless=reduce_to_dimensionless,
-    )
-
-    return alchemical_data
-
-
-def _compute_dg_mbar(
-    run_no: int,
-    start_frac: float,
-    end_frac: float,
-    lambda_windows: list[LambdaWindow],
-    equilibrated: bool = False,
-    temperature: float = 298.15,
-    units: str = "kcal",
-) -> float:
-    """
-    Helper function to compute free energy change using MBAR for a list of time windows.
-
-    This function is designed to be used with multiprocessing.
-
-    Parameters
-    ----------
-    run_no : int
-        Run number to analyze
-    start_frac : float
-        Start fraction of simulation time
-    end_frac : float
-        End fraction of simulation time
-    lambda_windows : List[LambdaWindow]
-        List of lambda windows
-    equilibrated : bool
-        Whether to use equilibration times
-    temperature : float
-        Temperature in Kelvin
-    units : str
-        Units for output
-
-    Returns
-    -------
-    float
-        Free energy change from MBAR
-    """
-    try:
-        # Load data for this run
-        alchemical_data = _load_alchemical_data_for_run(
-            lambda_windows=lambda_windows,
-            run_no=run_no,
-            temperature=temperature,
-            skip_time=0.0,
-            use_equilibrated=equilibrated,
-        )
-
-        if alchemical_data is None:
-            logger.warning(
-                f"No alchemical data found for run {run_no}. Skipping MBAR computation."
-            )
-            return np.nan
-
-        potential_energies = alchemical_data['potential_energies']
-        nsnapshots = alchemical_data['nsnapshots']
-
-        # Determine time window indices
-        total_snapshots = min(nsnapshots)  # Use minimum to ensure all windows have data
-
-        equil_offset = 0
-        if equilibrated:
-            raise NotImplementedError(
-                "Equilibration handling is not implemented in this function _compute_dg_mbar()."
-            )
-
-        # Calculate time window boundaries
-        start_idx = equil_offset + int(start_frac * (total_snapshots - equil_offset))
-        end_idx = equil_offset + int(end_frac * (total_snapshots - equil_offset))
-
-        if end_idx <= start_idx:
-            logger.warning(
-                f"Invalid time window for run {run_no}: {start_idx}-{end_idx}"
-            )
-            return np.nan
-
-        # Extract time window data
-        window_potential = potential_energies[:, :, start_idx:end_idx]
-        window_samples = np.full(len(lambda_windows), end_idx - start_idx, dtype=int)
-
-        # TODO: do we really need this check? if so, what is the cutoff?
-        if window_samples[0] < 2:
-            logger.warning(f"Too few samples in time window for run {run_no}")
-            return np.nan
-
-        # Run MBAR on this time window
-        estimator = FreeEnergyEstimator(
-            temperature=temperature, units=units, software="Gromacs"
-        )
-
-        result = estimator.estimate_mbar(
-            potential_energies=window_potential,
-            num_samples_per_state=window_samples,
-            regular_estimate=False,  # Just return endpoint free energy
-        )
-
-        if result['success']:
-            return result['free_energy']
-        else:
-            logger.warning(
-                f"MBAR failed for run {run_no}, time window {start_frac}-{end_frac}"
-            )
-            return np.nan
-
-    except Exception as e:
-        logger.warning(f"Error computing MBAR for run {run_no}: {e}")
-        return np.nan
 
 
 class EquilibriumMultiwindowDetector:
@@ -382,8 +243,11 @@ class EquilibriumMultiwindowDetector:
             raise ValueError("first_frac + last_frac must be < 1")
 
     def detect_equilibrium(
-        self, leg: Leg, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self,
+        target: list[LambdaWindow],
+        run_nos: Optional[list[int]] = None,
+        **kwargs,
+    ) -> tuple[bool, Optional[float]]:
         """
         Detect equilibrium across multiple lambda windows.
 
@@ -399,15 +263,15 @@ class EquilibriumMultiwindowDetector:
         Tuple[bool, Optional[float]]
             (equilibrated, fractional_equilibration_time)
         """
+        if isinstance(target, LambdaWindow):
+            raise ValueError(
+                "Multiwindow method requires list of LambdaWindow, not single window"
+            )
+
+        lambda_windows = target
         try:
             if self.method == "paired_t":
-                return self._detect_paired_t_based(leg, run_nos)
-            elif self.method == "gradient":
-                return self._detect_gradient_based(leg, run_nos)
-            elif self.method == "kpss":
-                return self._detect_kpss_based(leg, run_nos)
-            elif self.method == "geweke":
-                return self._detect_geweke_based(leg, run_nos)
+                return self._detect_paired_t_based(lambda_windows, run_nos)
             else:
                 raise ValueError(f"Unsupported method: {self.method}")
 
@@ -417,10 +281,10 @@ class EquilibriumMultiwindowDetector:
 
     def _get_time_series_multiwindow(
         self,
-        lambda_windows: List[LambdaWindow],
-        run_nos: List[int],
+        lambda_windows: list[LambdaWindow],
+        run_nos: list[int],
         start_frac: float = 0.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Get combined time series using MBAR-like approach.
         Simplified version of get_time_series_multiwindow_mbar from a3fe.
@@ -687,6 +551,11 @@ class EquilibriumMultiwindowDetector:
     ) -> tuple[bool, Optional[float]]:
         """
         Paired t-test based detection - exact implementation from a3fe.
+
+        Retures
+        -------
+        Tuple[bool, Optional[float]]
+            (equilibrated, fractional_equilibration_time)
         """
         from scipy import stats
 
@@ -707,7 +576,7 @@ class EquilibriumMultiwindowDetector:
         for start_frac in start_fracs:
             # Get time series data using MBAR-like approach
             overall_dgs, overall_times = self._get_time_series_multiwindow_mbar(
-                lambda_windows, run_nos, start_frac  # Pass lambda_windows directly
+                lambda_windows=lambda_windows, run_nos=run_nos, start_frac=start_frac
             )
 
             # Calculate slice indices
@@ -736,11 +605,11 @@ class EquilibriumMultiwindowDetector:
                 equil_time = overall_times[0][0]
 
         # Update lambda window attributes if equilibrated
-        if equilibrated:
+        if equilibrated and fractional_equil_time is not None:  # makes mypy happy
             for lam_win in lambda_windows:
                 lam_win._equilibrated = True
-                lam_win._equil_time = fractional_equil_time * lam_win.get_tot_simtime(
-                    [1]
+                lam_win._equil_time = (
+                    fractional_equil_time * lam_win.get_tot_simulation_time(run_nos=[1])
                 )
 
         if output_dir is not None:
@@ -825,6 +694,8 @@ class EquilibriumDetectionManager:
     High-level manager for equilibrium detection across different methods.
     """
 
+    detector: Any  # noqa: E704
+
     def __init__(self, method: str = "multiwindow", **method_kwargs):
         """
         Parameters
@@ -840,25 +711,23 @@ class EquilibriumDetectionManager:
         # Initialize appropriate detector
         if method == "block_gradient":
             self.detector = EquilibriumBlockGradientDetector(**method_kwargs)
-        elif method == "chodera":
-            self.detector = EquilibriumChoderDetector(**method_kwargs)
         elif method == "multiwindow":
             self.detector = EquilibriumMultiwindowDetector(**method_kwargs)
         else:
             raise ValueError(f"Unknown method: {method}")
 
     def detect_window_equilibrium(
-        self, window: LambdaWindow, run_nos: Optional[List[int]] = None
-    ) -> Tuple[bool, Optional[float]]:
+        self, window: LambdaWindow, run_nos: Optional[list[int]] = None, **kwargs
+    ) -> tuple[bool, Optional[float]]:
         """Detect equilibrium for a single lambda window."""
         if self.method == "multiwindow":
             raise ValueError("Use detect_leg_equilibrium for multiwindow method")
 
-        return self.detector.detect_equilibrium(window, run_nos)
+        return self.detector.detect_equilibrium(window, run_nos=run_nos, **kwargs)
 
     def detect_leg_equilibrium(
-        self, leg: Leg, run_nos: Optional[List[int]] = None
-    ) -> Dict[str, Tuple[bool, Optional[float]]]:
+        self, leg: Leg, run_nos: Optional[list[int]] = None, **kwargs
+    ) -> dict[str, tuple[bool, Optional[float]]]:
         """
         Detect equilibrium for all windows in a leg.
 
@@ -867,37 +736,41 @@ class EquilibriumDetectionManager:
         Dict[str, Tuple[bool, Optional[float]]]
             Results for each window, keyed by "lambda_{state}"
         """
+        lambda_windows = leg.lambda_windows
         results = {}
 
         if self.method == "multiwindow":
             # Multi-window methods analyze the entire leg at once
-            equilibrated, equil_time = self.detector.detect_equilibrium(leg, run_nos)
+            equilibrated, frac_equil_time = self.detector.detect_equilibrium(
+                target=lambda_windows, run_nos=run_nos, **kwargs
+            )
 
             # Apply results to all windows
             for window in leg.lambda_windows:
-                results[f"lambda_{window.lam_state}"] = (equilibrated, equil_time)
+                results[f"lambda_{window.lam_state}"] = (equilibrated, frac_equil_time)
+                window._equilibrated = equilibrated
 
-                # Update window attributes
-                if hasattr(window, '_equilibrated'):
-                    window._equilibrated = equilibrated
-                if hasattr(window, '_equil_time') and equil_time is not None:
-                    # Convert fractional time to absolute time for each window
-                    total_time = self._estimate_window_total_time(window)
-                    window._equil_time = equil_time * total_time
+                # Convert fractional equilibration time to absolute time for this specific window
+                # TODO: but get_tot_simulation_time() returns the sum of all runs?
+                total_time = window.get_tot_simulation_time(run_nos or [1])
+                if frac_equil_time is not None:  # makes mypy happy
+                    window._equil_time = frac_equil_time * total_time
+                else:
+                    window._equil_time = None
         else:
             # Single-window methods
             for window in leg.lambda_windows:
                 try:
-                    equilibrated, equil_time = self.detector.detect_equilibrium(
-                        window, run_nos
+                    equilibrated, frac_equil_time = self.detector.detect_equilibrium(
+                        target=window, run_nos=run_nos, **kwargs
                     )
-                    results[f"lambda_{window.lam_state}"] = (equilibrated, equil_time)
+                    results[f"lambda_{window.lam_state}"] = (
+                        equilibrated,
+                        frac_equil_time,
+                    )
 
-                    # Update window attributes
-                    if hasattr(window, '_equilibrated'):
-                        window._equilibrated = equilibrated
-                    if hasattr(window, '_equil_time'):
-                        window._equil_time = equil_time
+                    window._equilibrated = equilibrated
+                    window._equil_time = frac_equil_time
 
                 except Exception as e:
                     logger.error(
@@ -909,8 +782,8 @@ class EquilibriumDetectionManager:
         return results
 
     def detect_calculation_equilibrium(
-        self, calculation: Calculation, run_nos: Optional[List[int]] = None
-    ) -> Dict[str, Dict[str, Tuple[bool, Optional[float]]]]:
+        self, calculation: Calculation, run_nos: Optional[list[int]] = None, **kwargs
+    ) -> dict[str, dict[str, tuple[bool, Optional[float]]]]:
         """
         Detect equilibrium for entire calculation.
 
@@ -923,25 +796,18 @@ class EquilibriumDetectionManager:
 
         for leg in calculation.legs:
             leg_name = leg.leg_type.name.lower()
-            all_results[leg_name] = self.detect_leg_equilibrium(leg, run_nos)
+            all_results[leg_name] = self.detect_leg_equilibrium(leg, run_nos, **kwargs)
 
         return all_results
-
-    def _estimate_window_total_time(self, window: LambdaWindow) -> float:
-        """Estimate total simulation time for a window (simplified)."""
-        raise NotImplementedError(
-            "Total time estimation is not implemented. "
-            "Please implement _estimate_window_total_time in the detector."
-        )
 
 
 # Convenience functions for easy usage
 def detect_equilibrium(
-    target: Union[LambdaWindow, Leg, Calculation],
-    method: str = "block_gradient",
-    run_nos: Optional[List[int]] = None,
+    target: Union[LambdaWindow, Leg, Calculation, list[LambdaWindow]],
+    method: str = "multiwindow",
+    run_nos: Optional[list[int]] = None,
     **method_kwargs,
-) -> Union[Tuple[bool, Optional[float]], Dict]:
+) -> Union[tuple[bool, Optional[float]], dict]:
     """
     Convenience function to detect equilibrium.
 
@@ -949,7 +815,7 @@ def detect_equilibrium(
     ----------
     target : LambdaWindow, Leg, or Calculation
         Target to analyze
-    method : str, default "block_gradient"
+    method : str, default "multiwindow"
         Detection method
     run_nos : List[int], optional
         Run numbers to analyze
@@ -961,13 +827,45 @@ def detect_equilibrium(
     Union[Tuple[bool, Optional[float]], Dict]
         Results depend on target type
     """
+    if isinstance(target, LambdaWindow) and method == "multiwindow":
+        raise ValueError(
+            "Multiwindow method cannot be used with single LambdaWindow. "
+            "Use method='block_gradient' for single windows, or pass a Leg/list of windows."
+        )
+
+    if isinstance(target, list) and method != "multiwindow":
+        raise ValueError(
+            f"Method '{method}' cannot be used with list of LambdaWindow objects. "
+            "Use method='multiwindow' or pass individual windows."
+        )
+
     manager = EquilibriumDetectionManager(method, **method_kwargs)
 
     if isinstance(target, LambdaWindow):
-        return manager.detect_window_equilibrium(target, run_nos)
+        return manager.detect_window_equilibrium(target, run_nos, **method_kwargs)
+
     elif isinstance(target, Leg):
-        return manager.detect_leg_equilibrium(target, run_nos)
+        return manager.detect_leg_equilibrium(target, run_nos, **method_kwargs)
+
     elif isinstance(target, Calculation):
-        return manager.detect_calculation_equilibrium(target, run_nos)
+        return manager.detect_calculation_equilibrium(target, run_nos, **method_kwargs)
+
+    elif isinstance(target, list):
+        # Handle list of LambdaWindow objects for multiwindow analysis
+        if not target:
+            raise ValueError("Empty list of lambda windows provided")
+
+        if not all(isinstance(window, LambdaWindow) for window in target):
+            raise ValueError("All items in target list must be LambdaWindow objects")
+
+        # For multiwindow method, pass the list directly to the detector
+        if method == "multiwindow":
+            return manager.detector.detect_equilibrium(target, run_nos)
+        else:
+            raise ValueError(f"Method '{method}' not supported for list of windows")
+
     else:
-        raise ValueError(f"Unsupported target type: {type(target)}")
+        raise ValueError(
+            f"Unsupported target type: {type(target)}. "
+            f"Expected LambdaWindow, Leg, Calculation, or list[LambdaWindow]"
+        )
