@@ -62,7 +62,9 @@ def _load_alchemical_data_for_run(
 
     if not xvg_files:
         logger.warning(f"No XVG files found for run {run_no}")
-        return None
+        raise FileNotFoundError(
+            f"No XVG files found for run {run_no} in any lambda window."
+        )
 
     # Load alchemical data
     alchemical_data = load_alchemical_data(
@@ -448,16 +450,6 @@ class EquilibriumMultiwindowDetector:
         This function is adapted from get_time_series_multiwindow()
         https://github.com/michellab/a3fe/blob/main/a3fe/analyse/process_grads.py
         """
-        # Check that weights are defined for all windows
-        if not all(
-            hasattr(win, 'lam_val_weight') and win.lam_val_weight
-            for win in lambda_windows
-        ):
-            # Set equal weights if not defined
-            for win in lambda_windows:
-                if not hasattr(win, 'lam_val_weight'):
-                    win.lam_val_weight = 1.0 / len(lambda_windows)
-
         n_runs = len(run_nos)
         n_points = 100  # Block average into 100 points
 
@@ -572,9 +564,7 @@ class EquilibriumMultiwindowDetector:
             raise ValueError("No lambda windows provided")
 
         # Check equilibration status if required
-        if equilibrated and not all(
-            getattr(lam, 'equilibrated', False) for lam in lambda_windows
-        ):
+        if equilibrated and not all(lam.equilibrated for lam in lambda_windows):
             raise ValueError(
                 "The equilibration times and statistics have not been set for all lambda "
                 "windows in the stage. Please set these before running this function."
@@ -662,18 +652,14 @@ class EquilibriumMultiwindowDetector:
 
         # Calculate times for each run
         for i, run_no in enumerate(run_nos):
-            # Get total simulation time for this run
+            # Get total simulation time for this run (one run)
             total_time = sum(
-                getattr(window, 'get_tot_simulation_time', lambda x: 1.0)([run_no])
-                for window in lambda_windows
+                window.get_tot_simulation_time([run_no]) for window in lambda_windows
             )
-
             # Get equilibration time if applicable
             equil_time = 0.0
             if equilibrated:
-                equil_time = sum(
-                    getattr(window, 'equil_time', 0.0) for window in lambda_windows
-                )
+                equil_time = sum(window.equil_time for window in lambda_windows)
 
             # Calculate time points
             times = [

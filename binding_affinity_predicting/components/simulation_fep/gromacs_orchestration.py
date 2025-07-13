@@ -82,6 +82,7 @@ class LambdaWindow(SimulationRunner):
         self.slurm_generator = slurm_generator or self._create_default_slurm_generator()
 
         # Initialize _sub_sim_runners as list of Simulation objects
+        # NOTE: this is a bit confusing, but we use this to store
         self._sub_sim_runners: list[Simulation] = []  # type: ignore
 
     def _create_default_mdp_generator(self) -> MDPGenerator:
@@ -743,7 +744,7 @@ class Calculation(SimulationRunner):
     def run(
         self,
         run_nos: Optional[list[int]] = None,
-        runtime: Optional[float] = None,  # ns
+        runtime: Optional[float] = None,  # unit: ns
         use_hpc: bool = True,
         run_sync: bool = True,
     ) -> Optional[threading.Thread]:
@@ -757,7 +758,7 @@ class Calculation(SimulationRunner):
         run_nos : List[int] or None
             If provided, only run those replica indices (1-based) for each lambda.
 
-        runtime_ns : float, optional, default: 0.001 (ns)
+        runtime : float, optional, default: 0.001 (ns)
             Constant runtime for each lambda window. If None, uses sim_config.runtime_ns.
             NOTE: when this is provided, it will override the MDP file's `nsteps` parameter.
             This is useful for testing purposes and for lambda optimization.
@@ -774,10 +775,8 @@ class Calculation(SimulationRunner):
             raise ValueError("Calculation has not been set up yet. Call setup() first.")
 
         run_nos = self._get_valid_run_nos(run_nos)
-
         # Track execution mode for status checking
         self._last_run_used_hpc = use_hpc
-
         logger.info(f"Starting ABFE calculation with {len(self._sub_sim_runners)} legs")
 
         if use_hpc:
