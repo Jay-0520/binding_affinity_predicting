@@ -207,6 +207,8 @@ class AdaptiveRuntimeAllocator:
         Process a single window for efficiency optimization.
 
         Returns True if the window has reached optimal efficiency.
+
+        This is the same as what in A3FE is called `Stage._run_loop_adaptive_efficiency()`.
         """
         # Calculate predicted optimal runtime
         predicted_runtime = self._calculate_optimal_runtime(normalized_sem_dg)
