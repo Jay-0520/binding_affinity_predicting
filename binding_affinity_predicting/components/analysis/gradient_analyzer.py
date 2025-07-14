@@ -147,7 +147,7 @@ class GradientAnalyzer:
         for window in lambda_windows:
             try:
                 # Read gradient data
-                times, gradients = self.read_gradients_from_window(window, run_nos)
+                _, gradients = self.read_gradients_from_window(window, run_nos)
 
                 # Calculate SEMs based on origin type
                 if origin == "inter":
@@ -212,7 +212,11 @@ class GradientAnalyzer:
 
     def _calculate_inter_run_sem(self, gradients: np.ndarray) -> float:
         """
-        Calculate inter-run standard error of the mean.
+        Calculate inter-run (across multiple runs) standard error of the mean for
+            a given lambda window.
+
+        Interpretation:
+            If I ran this lambda window multiple times, how much would the average gradient vary?
 
         Parameters
         ----------
@@ -242,7 +246,13 @@ class GradientAnalyzer:
 
     def _calculate_intra_run_sem(self, gradients: np.ndarray) -> float:
         """
-        Calculate intra-run standard error of the mean.
+        Calculate intra-run (within a single run) standard error of the mean for
+            a given lambda window
+
+        Interpretation:
+            Given the natural fluctuations and correlations in my MD simulation, how precisely
+            do I know the average gradient for this lambda window?
+
 
         Parameters
         ----------
