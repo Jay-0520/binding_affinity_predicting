@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class AdaptiveRuntimeManager:
+class AdaptiveRuntimeAllocator:
     """
     Manager for adaptive efficiency allocation in GROMACS FEP calculations.
 
