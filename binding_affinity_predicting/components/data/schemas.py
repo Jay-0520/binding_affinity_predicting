@@ -146,21 +146,21 @@ class GromacsFepSimulationConfig(BaseModel):
 
     coul_lambdas: dict[LegType, list[float]] = Field(
         default_factory=lambda: {
-                        LegType.BOUND: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  # noqa: E127,E128,E131,E122, E501
-                             0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,  # noqa: E127,E128,E131,E122, E501
-                             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],   # noqa: E127,E128,E131,E122, E501
-            LegType.FREE:  [0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,   # noqa: E127,E128,E131,E122, E501
-                            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],    # noqa: E127,E128,E131,E122, E501
+                        LegType.BOUND: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  # noqa: E127,E128,E131,E122,E501
+                             0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,  # noqa: E127,E128,E131,E122,E501
+                             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],   # noqa: E127,E128,E131,E122,E501
+            LegType.FREE:  [0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,   # noqa: E127,E128,E131,E122,E501
+                            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],    # noqa: E127,E128,E131,E122,E501
         }
     )
     vdw_lambdas: dict[LegType, list[float]] = (
         Field(
             default_factory=lambda: {
-                           LegType.BOUND: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  # noqa: E127,E128,E131,E122, E501
-                             0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.2, 0.3, 0.4,   # noqa: E127,E128,E131,E122, E501
-                             0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0],  # noqa: E127,E128,E131,E122, E501
-            LegType.FREE:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.2, 0.3, 0.4,   # noqa: E127,E128,E131,E122, E501
-                            0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0],   # noqa: E127,E128,E131,E122, E501
+                           LegType.BOUND: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  # noqa: E127,E128,E131,E122,E501
+                             0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.2, 0.3, 0.4,     # noqa: E127,E128,E131,E122,E501
+                             0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0],  # noqa: E127,E128,E131,E122,E501
+            LegType.FREE:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.2, 0.3, 0.4,      # noqa: E127,E128,E131,E122,E501
+                            0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0],  # noqa: E127,E128,E131,E122,E501
             }
         )
     )
@@ -243,7 +243,14 @@ class SomdFepSimulationConfig(BaseModel):
     lambda_values: dict[LegType, dict[StageType, list[float]]] = Field(
         default_factory=lambda: {
             LegType.BOUND: {
-                StageType.RESTRAIN: [0.0, 0.125, 0.25, 0.375, 0.5, 1.0],
+                StageType.RESTRAIN: [
+                    0.0,
+                    0.125,
+                    0.25,
+                    0.375,
+                    0.5,
+                    1.0,  # noqa: E127,E128,E131,E122,E501
+                ],
                 StageType.DISCHARGE: [
                     0.0,
                     0.143,
@@ -252,7 +259,7 @@ class SomdFepSimulationConfig(BaseModel):
                     0.571,
                     0.714,
                     0.857,
-                    1.0,
+                    1.0,  # noqa: E127,E128,E131,E122,E501
                 ],
                 StageType.VANISH: [
                     0.0,
@@ -264,7 +271,7 @@ class SomdFepSimulationConfig(BaseModel):
                     0.15,
                     0.175,
                     0.2,
-                    0.225,
+                    0.225,  # noqa: E127,E128,E131,E122,E501
                     0.25,
                     0.275,
                     0.3,
@@ -274,7 +281,7 @@ class SomdFepSimulationConfig(BaseModel):
                     0.4,
                     0.425,
                     0.45,
-                    0.475,
+                    0.475,  # noqa: E127,E128,E131,E122,E501
                     0.5,
                     0.525,
                     0.55,
@@ -284,13 +291,13 @@ class SomdFepSimulationConfig(BaseModel):
                     0.65,
                     0.675,
                     0.7,
-                    0.725,
-                    0.75,
+                    0.725,  # noqa: E127,E128,E131,E122,E501
+                    0.75,  # noqa: E127,E128,E131,E122,E501
                     0.8,
                     0.85,
                     0.9,
                     0.95,
-                    1.0,
+                    1.0,  # noqa: E127,E128,E131,E122,E501
                 ],
             },
             LegType.FREE: {
@@ -302,7 +309,7 @@ class SomdFepSimulationConfig(BaseModel):
                     0.571,
                     0.714,
                     0.857,
-                    1.0,
+                    1.0,  # noqa: E127,E128,E131,E122,E501
                 ],
                 StageType.VANISH: [
                     0.0,
@@ -313,7 +320,7 @@ class SomdFepSimulationConfig(BaseModel):
                     0.222,
                     0.278,
                     0.333,
-                    0.389,
+                    0.389,  # noqa: E127,E128,E131,E122,E501
                     0.444,
                     0.5,
                     0.556,
@@ -322,7 +329,7 @@ class SomdFepSimulationConfig(BaseModel):
                     0.722,
                     0.778,
                     0.889,
-                    1.0,
+                    1.0,  # noqa: E127,E128,E131,E122,E501
                 ],
             },
         }
