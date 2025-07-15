@@ -241,8 +241,8 @@ class AdaptiveRuntimeAllocator:
                     f"  Limiting resubmission time to {resubmit_time:.3f} ns "
                     f"(current total per replica)"
                 )
-
-            # Round up to nearest 0.1 ns
+            # TODO: do we need at least 0.1 ns resubmission time? by JJH 2025-07-14
+            # Any positive resubmit_time, no matter how small, gets rounded up to at least 0.1 ns
             resubmit_time = np.ceil(resubmit_time * 10) / 10
 
             if resubmit_time > 0:

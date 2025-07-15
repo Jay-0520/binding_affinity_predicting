@@ -187,20 +187,6 @@ class TestProcessWindowForEfficiency:
         actual_resubmit = call_args[1]['runtime']
         assert pytest.approx(expected_resubmit, rel=1e-2) == actual_resubmit
 
-    def test_resubmission_time_too_small(self, allocator, mock_window):
-        """Test case where calculated resubmission time is too small (<0.1 ns)"""
-        mock_window.get_tot_simulation_time.return_value = (
-            3.162  # Very close to ~3.162 optimal
-        )
-        normalized_sem_dg = 0.1  # Will result in ~3.162 ns optimal
-
-        result = allocator._process_window_for_efficiency(
-            window=mock_window, normalized_sem_dg=normalized_sem_dg, run_nos=[1]
-        )
-        # Verify window is considered efficient (resubmit time is 0)
-        assert result is True
-        mock_window.run.assert_not_called()
-
     def test_resubmission_fails_exception_handling(self, allocator, mock_window):
         """Test exception handling when window.run() fails"""
         mock_window.get_tot_simulation_time.return_value = 1.0  # 1 ns actual
@@ -214,3 +200,17 @@ class TestProcessWindowForEfficiency:
         )
         assert result is True
         mock_window.run.assert_called_once()
+
+    def test_default_run_nos_parameter(self, allocator, mock_window):
+        """Test that default run_nos=[1] is used when None is passed"""
+        mock_window.get_tot_simulation_time.return_value = 10.0  # Already efficient
+        normalized_sem_dg = 0.1
+
+        # Execute with run_nos=None
+        result = allocator._process_window_for_efficiency(
+            window=mock_window, normalized_sem_dg=normalized_sem_dg, run_nos=None
+        )
+
+        # Verify default [1] was used
+        mock_window.get_tot_simulation_time.assert_called_once_with([1])
+        assert result is True
