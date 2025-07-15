@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from binding_affinity_predicting.components.analysis.runtime_allocator import (
-    AdaptiveRuntimeAllocator,
+from binding_affinity_predicting.components.simulation_fep.runtime_allocator import (
+    OptimalRuntimeAllocator,
 )
 
 
@@ -60,7 +60,7 @@ def mock_dependencies(mocker):
 @pytest.fixture
 def allocator(mock_calculation, mock_gradient_analyzer, mock_dependencies):
     """Create an AdaptiveRuntimeAllocator with mocked dependencies"""
-    allocator = AdaptiveRuntimeAllocator(
+    allocator = OptimalRuntimeAllocator(
         calculation=mock_calculation,
         runtime_constant=0.001,
         cycle_pause=0.1,  # Very short pause for testing
