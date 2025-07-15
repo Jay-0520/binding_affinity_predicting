@@ -122,7 +122,7 @@ def test_calculate_optimal_runtime_directly(allocator):
 
 
 class TestProcessWindowForEfficiency:
-    """Test class for _process_window_for_efficiency method"""
+    """Test class for _process_window_for_efficiency() method"""
 
     def test_window_already_efficient(self, allocator, mock_window):
         """Test window that already has sufficient runtime"""
