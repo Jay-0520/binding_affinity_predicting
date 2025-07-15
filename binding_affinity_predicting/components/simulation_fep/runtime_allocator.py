@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class AdaptiveRuntimeAllocator:
+class OptimalRuntimeAllocator:
     """
-    Manager for adaptive efficiency allocation in GROMACS FEP calculations.
+    Manager for adaptive runtime allocation in GROMACS FEP calculations.
 
     This class implements the adaptive efficiency algorithm from A3FE that
     automatically allocates simulation time to achieve maximal estimation
@@ -36,14 +36,17 @@ class AdaptiveRuntimeAllocator:
         use_hpc: bool = True,
     ) -> None:
         """
-        Initialize adaptive efficiency manager.
+        Initialize optimal runtime allocator.
 
         Parameters
         ----------
         calculation : Calculation
             GROMACS calculation object to manage
         runtime_constant : float, default 0.001
-            Runtime constant (kcal²·mol⁻²·ns⁻¹) for efficiency optimization
+            The runtime_constant (kcal**2 mol**-2 ns*-1) only affects behaviour
+            if running adaptively.
+            This is used to calculate how long to run each simulation for based on the current
+            uncertainty of the per-window free energy estimate.
         relative_simulation_cost : float, default 1.0
             Relative computational cost of simulations
         max_runtime_per_window : float, default 30.0
@@ -65,13 +68,13 @@ class AdaptiveRuntimeAllocator:
         self._maximally_efficient = False
         self.kill_thread = False
 
-        logger.info("Initialized adaptive efficiency manager with:")
+        logger.info("Initialized adaptive optimal runtime allocator with:")
         logger.info(f"  Runtime constant: {runtime_constant}")
         logger.info(f"  Max runtime per window: {max_runtime_per_window} ns")
 
     def run_adaptive_efficiency_loop(self, run_nos: Optional[list[int]] = None) -> None:
         """
-        Run the main adaptive efficiency loop.
+        Run the adaptive optimal runtime allocator loop.
 
         This method implements the core algorithm from A3FE that:
         1. Waits for all windows to finish current simulations
@@ -85,7 +88,7 @@ class AdaptiveRuntimeAllocator:
         run_nos : list[int], optional
             Run numbers to include in analysis
         """
-        logger.info("Starting adaptive efficiency optimization loop...")
+        logger.info("Starting adaptive runtime optimization loop...")
 
         # Reset efficiency flag
         self._maximally_efficient = False
@@ -93,7 +96,7 @@ class AdaptiveRuntimeAllocator:
         iteration = 0
         while not self._maximally_efficient and not self.kill_thread:
             iteration += 1
-            logger.info(f"=== Adaptive Efficiency Iteration {iteration} ===")
+            logger.info(f"=== Adaptive Runtime Optimization Iteration {iteration} ===")
             logger.info(
                 "Maximum efficiency not achieved. Allocating simulation time..."
             )
@@ -102,7 +105,9 @@ class AdaptiveRuntimeAllocator:
             self._wait_for_all_windows()
 
             if self.kill_thread:
-                logger.info("Kill signal received: exiting adaptive efficiency loop")
+                logger.info(
+                    "Kill signal received: exiting adaptive runtime optimization loop"
+                )
                 return
 
             # Analyze all legs for efficiency
@@ -160,11 +165,11 @@ class AdaptiveRuntimeAllocator:
         self, leg: Leg, run_nos: Optional[list[int]]
     ) -> bool:
         """
-        Process a single leg for efficiency optimization.
+        Process a single leg for runtime optimization.
 
         Returns True if all windows in the leg have reached optimal efficiency.
         """
-        logger.info(f"Processing {leg.leg_type.name} leg for efficiency...")
+        logger.info(f"Processing {leg.leg_type.name} leg for runtime optimization...")
 
         # Get time-normalized SEMs using the gradient analyzer
         try:
@@ -204,7 +209,7 @@ class AdaptiveRuntimeAllocator:
         run_nos: Optional[list[int]],
     ) -> bool:
         """
-        Process a single window for efficiency optimization.
+        Process a single window for runtime optimization.
 
         Returns True if the window has reached optimal efficiency.
 
@@ -304,11 +309,85 @@ class AdaptiveRuntimeAllocator:
         self._maximally_efficient = False
 
     def stop(self) -> None:
-        """Stop the adaptive efficiency loop."""
+        """Stop the adaptive runtime optimization loop."""
         logger.info("Stopping adaptive efficiency optimization...")
         self.kill_thread = True
 
     @property
     def is_maximally_efficient(self) -> bool:
-        """Check if the calculation has reached maximum efficiency."""
+        """Check if the calculation has reached maximum efficiency,
+        aka. all windows are assigned with optimal runtime."""
         return self._maximally_efficient
+
+    def get_allocator_status(self) -> dict[str, Any]:
+        """
+        Get essential status information about the optimal runtime allocator.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary containing key status information:
+            - 'is_maximally_efficient': Whether optimization is complete
+            - 'runtime_constant': Current runtime constant value
+            - 'total_windows': Total number of lambda windows
+            - 'windows_running': Number of currently running windows
+            - 'total_simulation_time': Total simulation time across all windows (ns)
+        """
+        # Count running windows and total simulation time
+        total_windows = 0
+        windows_running = 0
+        total_simulation_time = 0.0
+
+        for leg in self.calculation.legs:
+            for window in leg.lambda_windows:
+                total_windows += 1
+                if window.running:
+                    windows_running += 1
+                total_simulation_time += window.get_tot_simulation_time([1])
+
+        return {
+            'is_maximally_efficient': self._maximally_efficient,
+            'runtime_constant': self.runtime_constant,
+            'total_windows': total_windows,
+            'windows_running': windows_running,
+            'total_simulation_time': total_simulation_time,
+        }
+
+
+# Convenience functions for easy usage
+def run_optimal_runtime_allocator(
+    calculation: Calculation,
+    runtime_constant: float = 0.001,
+    max_runtime_per_window: float = 30.0,
+    **kwargs,
+) -> OptimalRuntimeAllocator:
+    """
+    Convenience function to run optimal runtime allocator.
+
+    Parameters
+    ----------
+    calculation : Calculation
+        GROMACS calculation object
+    runtime_constant : float, default 0.001
+        Runtime constant for efficiency optimization
+    max_runtime_per_window : float, default 30.0
+        Maximum runtime per window (ns)
+    **kwargs
+        Additional arguments for OptimalRuntimeAllocator
+
+    Returns
+    -------
+    OptimalRuntimeAllocator
+        Manager object for monitoring and control
+    """
+    manager = OptimalRuntimeAllocator(
+        calculation=calculation,
+        runtime_constant=runtime_constant,
+        max_runtime_per_window=max_runtime_per_window,
+        **kwargs,
+    )
+
+    # Run the optimization loop
+    manager.run_adaptive_efficiency_loop()
+
+    return manager

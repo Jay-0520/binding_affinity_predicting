@@ -19,7 +19,7 @@ import numpy as np
 from pydantic import Field
 
 from binding_affinity_predicting.components.analysis.autocorrelation import (
-    get_statistical_inefficiency as _get_statistical_inefficiency,
+    _statistical_inefficiency_chodera as _get_statistical_inefficiency,
 )
 from binding_affinity_predicting.components.data.enums import LegType
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
