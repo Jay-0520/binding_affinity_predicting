@@ -53,6 +53,7 @@ class LambdaWindow(SimulationRunner):
     note that in sim_params, we store the full list of bonded_list, coul_list, and vdw_list
     """
 
+    # TODO: what is "_dg" for?
     runtime_attributes = {"_finished": False, "_failed": False, "_dg": None}
 
     def __init__(
