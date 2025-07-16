@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, BaseModel
 
 from binding_affinity_predicting.components.analysis.autocorrelation import (
     _statistical_inefficiency_chodera as _get_statistical_inefficiency,
@@ -52,8 +52,7 @@ class SpacingMethod(Enum):
     USER_PROVIDED = "user_provided"
 
 
-@dataclass
-class StageConfig:
+class StageConfig(BaseModel):
     """Configuration for optimizing a specific FEP stage"""
 
     method: SpacingMethod = SpacingMethod.TARGET_ERROR
@@ -66,8 +65,7 @@ class StageConfig:
     round_lambdas: bool = True
 
 
-@dataclass
-class OptimizationConfig:
+class OptimizationConfig(BaseModel):
     """Overall configuration for multi-stage optimization"""
 
     restrained: StageConfig = Field(default_factory=lambda: StageConfig())

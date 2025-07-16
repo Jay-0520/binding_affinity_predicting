@@ -9,7 +9,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any, Optional
-
+import threading
 from binding_affinity_predicting.components.data.schemas import (
     GromacsFepSimulationConfig,
 )
@@ -26,12 +26,13 @@ from binding_affinity_predicting.components.simulation_fep.run_adaptive_simulati
 from binding_affinity_predicting.components.simulation_fep.runtime_allocator import (
     OptimalRuntimeAllocator,
 )
+from binding_affinity_predicting.components.simulation_fep.status_monitor import StatusMonitor
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class AdaptiveFepWorkflowManager:
+class AdaptiveFepSimulationWorkflow:
     """
     High-level manager for adaptive FEP workflows.
 
@@ -39,7 +40,8 @@ class AdaptiveFepWorkflowManager:
     optimization strategies for GROMACS FEP calculations.
     """
 
-    def __init__(self, calculation: Calculation):
+    def __init__(self, calculation: Calculation, enable_monitoring: bool = True, 
+                 use_hpc: bool = True, run_sync: bool = True) -> None:
         """
         Initialize the adaptive FEP workflow manager.
 
@@ -50,7 +52,45 @@ class AdaptiveFepWorkflowManager:
         """
         self.calculation = calculation
         self.workflow_results: dict[str, Any] = {}
+        self.enable_monitoring = enable_monitoring
+        self.use_hpc = use_hpc
+        self.run_sync = run_sync
 
+        # Initialize status monitor
+        if self.enable_monitoring:
+            self.status_monitor = StatusMonitor(self.calculation)
+            logger.info("Status monitoring enabled")
+        else:
+            self.status_monitor = None
+            logger.info("Status monitoring disabled")
+
+    def _print_simple_status(self) -> None:
+        """Print a simple status summary using the StatusMonitor."""
+        if self.status_monitor:
+            try:
+                summary = self.status_monitor.get_summary()
+                logger.info(f"Status: {summary}")
+            except Exception as e:
+                logger.warning(f"Could not get status summary: {e}")
+        else:
+            logger.info("Status monitoring is disabled")
+
+
+    def _check_simulation_success(self) -> bool:
+        """Check if simulations completed successfully using StatusMonitor."""
+        if not self.status_monitor:
+            # Fallback to calculation.failed if monitoring is disabled
+            return not self.calculation.failed
+        
+        try:
+            status = self.status_monitor.get_status()
+            job_counts = status.get("job_counts", {})
+            failed_count = job_counts.get("FAILED", 0)
+            return failed_count == 0
+        except Exception as e:
+            logger.warning(f"Could not check simulation success: {e}")
+            return not self.calculation.failed
+        
     def _run_lambda_optimization(
         self,
         run_nos: Optional[list[int]] = None,
@@ -145,7 +185,7 @@ class AdaptiveFepWorkflowManager:
             max_runtime_per_window=max_runtime_per_window,
             use_hpc=use_hpc,
         )
-        _ = manager.run_adaptive_simulation(run_nos=run_nos)
+        _ = manager.run_simulation(run_nos=run_nos)
 
         results = {
             'type': 'adaptive_simulation_workflow',
@@ -166,13 +206,12 @@ class AdaptiveFepWorkflowManager:
         max_runtime_per_window: float = 30.0,
         optimize_lambda_spacing: bool = True,
         run_nos: Optional[list[int]] = None,
-        use_hpc: bool = True,
-        run_sync: bool = True,
+        monitor_interval: int = 60,  # seconds between status updates
     ) -> dict[str, Any]:
         """
-        Run the complete adaptive FEP workflow following A3FE protocol.
+        Run the complete adaptive FEP workflow with simple monitoring.
 
-        This workflow implements the correct A3FE sequence:
+        This workflow implements the following sequence:
         1. Short simulations for gradient collection
         2. Lambda spacing optimization based on gradients
         3. Production simulations with optimized lambda values using adaptive equilibration
@@ -211,24 +250,29 @@ class AdaptiveFepWorkflowManager:
         try:
             # Phase 1: Short simulations for gradient collection
             logger.info("PHASE 1: SHORT SIMULATIONS FOR GRADIENT COLLECTION")
-            logger.info("-" * 50)
+            logger.info("=" * 50)
             logger.info(
                 f"Running {short_run_runtime} ns simulations for lambda optimization..."
             )
 
             # Run short simulations
             self.calculation.run(
-                runtime=short_run_runtime, use_hpc=use_hpc, run_sync=run_sync
+                runtime=short_run_runtime, use_hpc=self.use_hpc, run_sync=self.run_sync
             )
+
+            # Show initial status after starting simulations
+            if self.enable_monitoring:
+                logger.info("Phase 1 started, checking initial status...")
+                self._print_simple_status()
 
             # Wait for completion
             logger.info("Waiting for short simulations to complete...")
-            self._wait_for_calculation()
+            self._wait_for_calculation(check_interval=monitor_interval)
 
             short_sim_results = {
                 'type': 'short_simulations',
                 'runtime': short_run_runtime,
-                'successful': not self.calculation.failed,
+                'successful': self._check_simulation_success(),
             }
 
             workflow_results['phases_completed'].append('short_simulations')
@@ -236,6 +280,8 @@ class AdaptiveFepWorkflowManager:
 
             if not short_sim_results['successful']:
                 logger.error("Short simulations failed. Stopping workflow.")
+                if self.enable_monitoring:
+                    self._print_simple_status()  # Show final status
                 return workflow_results
 
             logger.info(
@@ -244,8 +290,8 @@ class AdaptiveFepWorkflowManager:
 
             # Phase 2: Lambda spacing optimization
             if optimize_lambda_spacing:
-                logger.info("\nPHASE 2: LAMBDA SPACING OPTIMIZATION")
-                logger.info("-" * 50)
+                logger.info("PHASE 2: LAMBDA SPACING OPTIMIZATION")
+                logger.info("=" * 50)
 
                 optimization_results = self._run_lambda_optimization(
                     run_nos=run_nos,
@@ -269,14 +315,14 @@ class AdaptiveFepWorkflowManager:
                     )
             else:
                 logger.info(
-                    "\nSKIPPING LAMBDA OPTIMIZATION (optimize_lambda_spacing=False)"
+                    "SKIPPING PHASE 2 LAMBDA OPTIMIZATION (optimize_lambda_spacing=False)"
                 )
 
             # Phase 3: Production simulations with adaptive equilibration and efficiency/runtime
             logger.info(
-                "\nPHASE 3: PRODUCTION WITH ADAPTIVE EQUILIBRATION & EFFICIENCY"
+                "PHASE 3: PRODUCTION WITH ADAPTIVE EQUILIBRATION & EFFICIENCY"
             )
-            logger.info("-" * 50)
+            logger.info("=" * 50)
 
             # Use optimized lambda values (if optimization was successful) for production runs
             production_results = self._run_adaptive_simulation(
@@ -284,7 +330,7 @@ class AdaptiveFepWorkflowManager:
                 equilibration_method=equilibration_method,
                 max_runtime_per_window=max_runtime_per_window,
                 run_nos=run_nos,
-                use_hpc=use_hpc,
+                use_hpc=self.use_hpc,
             )
 
             workflow_results['phases_completed'].append('production_adaptive')
@@ -359,20 +405,35 @@ class AdaptiveFepWorkflowManager:
         )
         logger.info("=" * 70)
 
+
+        # Show final status
+        if self.enable_monitoring:
+            self._print_simple_status()
+
         return workflow_results
 
     def _wait_for_calculation(self, check_interval: int = 60) -> None:
-        """Wait for calculation to complete."""
+        """Wait for calculation to complete with status monitoring."""
         if self.calculation.virtual_queue:
-            logger.info("Waiting for simulations to complete...")
+            logger.info("calc virtual_queue is not None; waiting for simulations to complete...")
+            
             while self.calculation.running:
+                # Print status during waiting if monitoring is enabled
+                if self.enable_monitoring:
+                    self._print_simple_status()
+                    
                 time.sleep(check_interval)
                 self.calculation.virtual_queue.update()
 
-            if self.calculation.failed:
-                logger.warning("Some simulations failed")
+            # Final check
+            if self._check_simulation_success():
+                logger.info("✅ All simulations completed successfully")
             else:
-                logger.info("All simulations completed successfully")
+                logger.warning("⚠️ Some simulations failed")
+        else:
+            # For local runs, just use a simple wait
+            logger.info("Running locally - waiting briefly for completion...")
+            time.sleep(5)  # Brief pause for local completion
 
     def save_workflow_report(self, output_dir: Optional[str] = None) -> None:
         """
@@ -416,6 +477,16 @@ class AdaptiveFepWorkflowManager:
                     )
 
                 f.write("\n")
+            
+            # Add status summary at the end of the report
+            if self.enable_monitoring:
+                f.write("FINAL STATUS SUMMARY:\n")
+                f.write("-" * 40 + "\n")
+                try:
+                    summary = self.status_monitor.get_summary()
+                    f.write(f"{summary}\n")
+                except Exception as e:
+                    f.write(f"Could not get status summary: {e}\n")
 
         logger.info(f"Workflow report saved to {output_path}")
 
@@ -428,8 +499,10 @@ def run_adaptive_fep_workflow(
     ensemble_size: int = 5,
     initial_runtime_constant: float = 0.001,
     max_runtime_per_window: float = 30.0,
+    short_run_runtime: float = 2.0, # ns
     use_hpc: bool = True,
-    use_sync: bool = False,
+    run_sync: bool = False,  # run asynchronously (non-blocking)
+    enable_monitoring: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
     """
@@ -455,17 +528,19 @@ def run_adaptive_fep_workflow(
     calculation.setup()
 
     # Create workflow manager
-    workflow_manager = AdaptiveFepWorkflowManager(calculation)
+    fep_workflow = AdaptiveFepSimulationWorkflow(calculation=calculation, 
+                                                 enable_monitoring=enable_monitoring,
+                                                 use_hpc=use_hpc,
+                                                 run_sync=run_sync)
 
-    results = workflow_manager.run_complete_adaptive_workflow(
+    results = fep_workflow.run_complete_adaptive_workflow(
         initial_runtime_constant=initial_runtime_constant,
         max_runtime_per_window=max_runtime_per_window,
-        use_hpc=use_hpc,
-        use_sync=use_sync,
+        short_run_runtime=short_run_runtime,
         **kwargs,
     )
 
     # Save report
-    workflow_manager.save_workflow_report()
+    fep_workflow.save_workflow_report()
 
     return results

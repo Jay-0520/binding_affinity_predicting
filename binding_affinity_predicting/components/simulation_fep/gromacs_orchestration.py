@@ -679,8 +679,8 @@ class Calculation(SimulationRunner):
             defaults from sim_config.
         """
         # Set up virtual queue if not provided
-        if virtual_queue is None:
-            virtual_queue = VirtualQueue(log_dir=output_dir)
+        # if virtual_queue is None:
+        #     virtual_queue = VirtualQueue(log_dir=output_dir)
 
         super().__init__(
             input_dir=input_dir,

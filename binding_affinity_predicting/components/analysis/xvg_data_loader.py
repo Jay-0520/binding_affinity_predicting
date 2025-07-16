@@ -22,7 +22,7 @@ from binding_affinity_predicting.components.analysis.utils import (
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.INFO)  # Set to INFO to avoid debug logs by default
 
 
 # TODO: maybe use this in gromacs_orchestration.py as well?
@@ -123,11 +123,11 @@ class GromacsXVGParser:
         # Parse data section
         data = self._parse_data_section(file_path, skip_time)
 
-        logger.info(f"Parsed XVG file {file_path.name}:")
-        logger.info(f"  Current state: {self.current_state}")
-        logger.info(f"  Data points: {len(data['times'])}")
-        logger.info(f"  dH/dλ components: {len(data['dhdl_components'])}")
-        logger.info(f"  Cross-evaluations: {len(data['cross_evaluations'])}")
+        logger.debug(f"Parsed XVG file {file_path.name}:")
+        logger.debug(f"  Current state: {self.current_state}")
+        logger.debug(f"  Data points: {len(data['times'])}")
+        logger.debug(f"  dH/dλ components: {len(data['dhdl_components'])}")
+        logger.debug(f"  Cross-evaluations: {len(data['cross_evaluations'])}")
 
         return data
 
@@ -157,7 +157,7 @@ class GromacsXVGParser:
             bonded = float(match.group(4))
 
             self.current_state = LambdaState(coul, vdw, bonded, state_id)
-            logger.info(f"Found current state: {self.current_state}")
+            logger.debug(f"Found current state: {self.current_state}")
         else:
             raise ValueError(
                 f"Could not derive lambda state from subtitle: {subtitle_line} "
@@ -329,7 +329,7 @@ def load_alchemical_data(
         try:
             data = parser.parse_xvg_file(file_path, skip_time)
             parsed_files.append(data)
-            logger.info(f"Successfully parsed {file_path.name}")
+            logger.debug(f"Successfully parsed {file_path.name}")
         except Exception as e:
             logger.error(f"Failed to parse {file_path}: {e}")
             continue
@@ -348,7 +348,7 @@ def load_alchemical_data(
     # Find maximum number of snapshots
     max_snapshots = max(len(data['times']) for data in parsed_files)
 
-    logger.info(
+    logger.debug(
         f"Dataset dimensions: {num_states} states, {num_components} "
         f"components, {max_snapshots} max snapshots"
     )
