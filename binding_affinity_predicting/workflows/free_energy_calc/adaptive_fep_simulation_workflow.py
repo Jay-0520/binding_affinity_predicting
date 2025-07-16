@@ -51,95 +51,6 @@ class AdaptiveFepWorkflowManager:
         self.calculation = calculation
         self.workflow_results: dict[str, Any] = {}
 
-    def _run_runtime_optimization(
-        self,
-        runtime_constant: float = 0.001,
-        max_runtime_per_window: float = 30.0,
-        run_nos: Optional[list[int]] = None,
-    ) -> dict[str, Any]:
-        """
-        Run adaptive efficiency optimization workflow.
-
-        Parameters
-        ----------
-        runtime_constant : float, default 0.001
-            Runtime constant for efficiency optimization
-        max_runtime_per_window : float, default 30.0
-            Maximum runtime per window (ns)
-        run_nos : list[int], optional
-            Run numbers to include
-
-        Returns
-        -------
-        dict
-            Results from efficiency optimization
-        """
-        logger.info("Running Adaptive Efficiency Optimization...")
-
-        manager = OptimalRuntimeAllocator(
-            calculation=self.calculation,
-            runtime_constant=runtime_constant,
-            max_runtime_per_window=max_runtime_per_window,
-        )
-        manager.run_adaptive_efficiency_loop(run_nos=run_nos)
-
-        results = {
-            'type': 'efficiency_optimization',
-            'successful': manager.is_maximally_efficient,
-            'runtime_constant': runtime_constant,
-            'status': manager.get_allocator_status(),
-        }
-
-        self.workflow_results['efficiency_optimization'] = results
-        return results
-
-    def _run_adaptive_simulation(
-        self,
-        initial_runtime_constant: float = 0.001,
-        equilibration_method: str = "multiwindow",
-        max_runtime_per_window: float = 30.0,
-        run_nos: Optional[list[int]] = None,
-    ) -> dict[str, Any]:
-        """
-        Run adaptive simulation workflow (equilibration + efficiency optimization).
-
-        Parameters
-        ----------
-        initial_runtime_constant : float, default 0.001
-            Initial runtime constant
-        equilibration_method : str, default "multiwindow"
-            Equilibration detection method
-        max_runtime_per_window : float, default 30.0
-            Maximum runtime per window (ns)
-        run_nos : list[int], optional
-            Run numbers to include
-
-        Returns
-        -------
-        dict
-            Results from simulation workflow
-        """
-        logger.info("Running Adaptive Simulation Workflow...")
-
-        manager = AdaptiveSimulationRunner(
-            calculation=self.calculation,
-            initial_runtime_constant=initial_runtime_constant,
-            equilibration_method=equilibration_method,
-            max_runtime_per_window=max_runtime_per_window,
-        )
-        _ = manager.run_adaptive_simulation(run_nos=run_nos)
-
-        results = {
-            'type': 'adaptive_simulation_workflow',
-            'successful': manager.is_equilibrated,
-            'iterations': manager.current_iteration,
-            'final_runtime_constant': manager.current_runtime_constant,
-            'status': manager.get_simulation_status(),
-        }
-
-        self.workflow_results['adaptive_simulation'] = results
-        return results
-
     def _run_lambda_optimization(
         self,
         run_nos: Optional[list[int]] = None,
@@ -196,6 +107,55 @@ class AdaptiveFepWorkflowManager:
         }
 
         self.workflow_results['lambda_optimization'] = results
+        return results
+
+    def _run_adaptive_simulation(
+        self,
+        initial_runtime_constant: float = 0.001,
+        equilibration_method: str = "multiwindow",
+        max_runtime_per_window: float = 30.0,
+        run_nos: Optional[list[int]] = None,
+        use_hpc: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Run adaptive simulation workflow (equilibration + efficiency optimization).
+
+        Parameters
+        ----------
+        initial_runtime_constant : float, default 0.001
+            Initial runtime constant
+        equilibration_method : str, default "multiwindow"
+            Equilibration detection method
+        max_runtime_per_window : float, default 30.0
+            Maximum runtime per window (ns)
+        run_nos : list[int], optional
+            Run numbers to include
+
+        Returns
+        -------
+        dict
+            Results from simulation workflow
+        """
+        logger.info("Running Adaptive Simulation Workflow...")
+
+        manager = AdaptiveSimulationRunner(
+            calculation=self.calculation,
+            initial_runtime_constant=initial_runtime_constant,
+            equilibration_method=equilibration_method,
+            max_runtime_per_window=max_runtime_per_window,
+            use_hpc=use_hpc,
+        )
+        _ = manager.run_adaptive_simulation(run_nos=run_nos)
+
+        results = {
+            'type': 'adaptive_simulation_workflow',
+            'successful': manager.is_equilibrated,
+            'iterations': manager.current_iteration,
+            'final_runtime_constant': manager.current_runtime_constant,
+            'status': manager.get_simulation_status(),
+        }
+
+        self.workflow_results['adaptive_simulation'] = results
         return results
 
     def run_complete_adaptive_workflow(
@@ -324,6 +284,7 @@ class AdaptiveFepWorkflowManager:
                 equilibration_method=equilibration_method,
                 max_runtime_per_window=max_runtime_per_window,
                 run_nos=run_nos,
+                use_hpc=use_hpc,
             )
 
             workflow_results['phases_completed'].append('production_adaptive')
@@ -467,6 +428,8 @@ def run_adaptive_fep_workflow(
     ensemble_size: int = 5,
     initial_runtime_constant: float = 0.001,
     max_runtime_per_window: float = 30.0,
+    use_hpc: bool = True,
+    use_sync: bool = False,
     **kwargs,
 ) -> dict[str, Any]:
     """
@@ -474,25 +437,6 @@ def run_adaptive_fep_workflow(
 
     This is the main entry point for users who want to run adaptive
     FEP calculations with minimal setup.
-
-    Parameters
-    ----------
-    input_dir : str
-        Input directory with prepared structures
-    output_dir : str
-        Output directory for results
-    sim_config : GromacsFepSimulationConfig
-        Simulation configuration
-    ensemble_size : int, default 5
-        Number of ensemble members
-    initial_runtime_constant : float, default 0.001
-        Initial runtime constant
-    max_runtime_per_window : float, default 30.0
-        Maximum runtime per window (ns)
-    production_runtime : float, optional
-        Runtime for production simulations (ns)
-    **kwargs
-        Additional arguments for specific workflows
 
     Returns
     -------
@@ -516,6 +460,8 @@ def run_adaptive_fep_workflow(
     results = workflow_manager.run_complete_adaptive_workflow(
         initial_runtime_constant=initial_runtime_constant,
         max_runtime_per_window=max_runtime_per_window,
+        use_hpc=use_hpc,
+        use_sync=use_sync,
         **kwargs,
     )
 

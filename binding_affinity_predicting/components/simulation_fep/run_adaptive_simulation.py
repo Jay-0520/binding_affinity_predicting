@@ -45,6 +45,7 @@ class AdaptiveSimulationRunner:
         max_runtime_per_window: float = 30.0,
         runtime_reduction_factor: float = 0.25,
         max_iterations: int = 10,
+        use_hpc: bool = True,
     ):
         """
         Initialize adaptive simulation runner.
@@ -81,6 +82,7 @@ class AdaptiveSimulationRunner:
         self.max_runtime_per_window = max_runtime_per_window
         self.runtime_reduction_factor = runtime_reduction_factor
         self.max_iterations = max_iterations
+        self.use_hpc = use_hpc
 
         # Initialize equilibrium detection manager
         self.detection_manager = EquilibriumDetectionManager(
@@ -92,6 +94,7 @@ class AdaptiveSimulationRunner:
             calculation=calculation,
             runtime_constant=self.current_runtime_constant,
             max_runtime_per_window=max_runtime_per_window,
+            use_hpc=self.use_hpc,
         )
 
         # State tracking
