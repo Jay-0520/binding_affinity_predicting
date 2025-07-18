@@ -42,6 +42,7 @@ class Simulation:
         mdp_generator: Optional[MDPGenerator] = None,
         slurm_generator: Optional[SlurmSubmitGenerator] = None,
         mdp_overrides: Optional[dict[str, Union[str, int, float]]] = None,
+        mdrun_options: Optional[str] = None,
     ) -> None:
         """
         Parameters
@@ -78,6 +79,10 @@ class Simulation:
             Custom MDP parameter overrides
         mdp_template : str, optional
             DEPRECATED: Path to MDP template (for backward compatibility)
+        mdrun_options : str, optional
+            Additional flags for 'gmx mdrun' command (e.g., '-ntmpi 1 -ntomp 8 -gpu_id 0').
+            These flags will be parsed and passed to the mdrun command during simulation execution.
+
         """
         self.lam_state = lam_state
         self.work_dir = Path(work_dir)
@@ -91,6 +96,7 @@ class Simulation:
         self.vdw_list = list(vdw_list)
         self.extra_params = extra_params or {}
         self.mdp_overrides = mdp_overrides or {}
+        self.mdrun_options = mdrun_options
 
         # Initialize Pydantic-based generators
         self.mdp_generator: MDPGenerator = (
@@ -340,6 +346,14 @@ class Simulation:
             # this always works even if the cpt file does not exist
             f"lambda_{self.lam_state}_run_{self.run_index}.cpt",
         ]
+
+        # add mdrun_options if provided
+        if self.mdrun_options:
+            # parse the mdrun_options string and add to command
+            options = self.mdrun_options.split()
+            mdrun_cmd.extend(options)
+            logger.info(f"Added mdrun options: {' '.join(options)}")
+
         try:
             result = subprocess.run(
                 mdrun_cmd, cwd=self.work_dir, check=True, capture_output=True, text=True
@@ -434,6 +448,7 @@ class Simulation:
             },
             "mdp_parameters": self.mdp_generator.base_params.dict(),
             "slurm_parameters": self.slurm_generator.base_params.dict(),
+            "mdrun_options": self.mdrun_options,
         }
 
     def __str__(self) -> str:
