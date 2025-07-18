@@ -45,6 +45,7 @@ class AdaptiveSimulationRunner:
         max_runtime_per_window: float = 30.0,
         runtime_reduction_factor: float = 0.25,
         max_iterations: int = 10,
+        use_hpc: bool = True,
     ):
         """
         Initialize adaptive simulation runner.
@@ -81,6 +82,7 @@ class AdaptiveSimulationRunner:
         self.max_runtime_per_window = max_runtime_per_window
         self.runtime_reduction_factor = runtime_reduction_factor
         self.max_iterations = max_iterations
+        self.use_hpc = use_hpc
 
         # Initialize equilibrium detection manager
         self.detection_manager = EquilibriumDetectionManager(
@@ -92,6 +94,7 @@ class AdaptiveSimulationRunner:
             calculation=calculation,
             runtime_constant=self.current_runtime_constant,
             max_runtime_per_window=max_runtime_per_window,
+            use_hpc=self.use_hpc,
         )
 
         # State tracking
@@ -104,7 +107,7 @@ class AdaptiveSimulationRunner:
         logger.info(f"  Equilibration method: {equilibration_method}")
         logger.info(f"  Max iterations: {max_iterations}")
 
-    def run_adaptive_simulation(self, run_nos: Optional[list[int]] = None) -> bool:
+    def run_simulation(self, run_nos: Optional[list[int]] = None) -> bool:
         """
         Run the adaptive simulation workflow.
 
@@ -134,7 +137,7 @@ class AdaptiveSimulationRunner:
         while not self._equilibrated and self._iteration < self.max_iterations:
             self._iteration += 1
 
-            logger.info(f"\n=== EQUILIBRATION ITERATION {self._iteration} ===")
+            logger.info(f"*** EQUILIBRATION ITERATION {self._iteration} ***")
             logger.info(f"Runtime constant: {self.current_runtime_constant}")
 
             # Step 1: Run adaptive efficiency optimization
@@ -398,7 +401,7 @@ def run_adaptive_simulations(
     )
 
     # Run the adaptive simulation
-    success = manager.run_adaptive_simulation(run_nos=run_nos)
+    success = manager.run_simulation(run_nos=run_nos)
 
     if save_report:
         manager.save_adaptive_simulation_run_report()

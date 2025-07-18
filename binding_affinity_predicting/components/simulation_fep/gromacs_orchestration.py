@@ -74,6 +74,9 @@ class LambdaWindow(SimulationRunner):
         self.virtual_queue = virtual_queue
         self.sim_params = sim_params
 
+        # Extract mdrun_options from sim_params if available
+        self.mdrun_options = sim_params.get("mdrun_options", None)
+
         # Lambda weight for multiwindow equilibrium detection
         # Default to equal weighting if not specified
         self.lam_val_weight: float = sim_params.get('lam_val_weight', 1.0)
@@ -130,6 +133,7 @@ class LambdaWindow(SimulationRunner):
                 slurm_generator=self.slurm_generator,
                 # runtime_ns=self.sim_params.get("runtime_ns"),  # this is from sim_config
                 mdp_overrides=self.sim_params.get("mdp_overrides", {}),
+                mdrun_options=self.mdrun_options,
             )
             # Set up the simulation's MDP file immediately
             sim.setup()
@@ -491,6 +495,7 @@ class Leg(SimulationRunner):
                 "modules_to_load": getattr(self.sim_config, "modules_to_load", []),
                 "pre_commands": getattr(self.sim_config, "pre_commands", []),
                 "post_commands": getattr(self.sim_config, "post_commands", []),
+                "mdrun_options": getattr(self.sim_config, "mdrun_options", None),
             }
 
             window = LambdaWindow(
@@ -679,8 +684,8 @@ class Calculation(SimulationRunner):
             defaults from sim_config.
         """
         # Set up virtual queue if not provided
-        if virtual_queue is None:
-            virtual_queue = VirtualQueue(log_dir=output_dir)
+        # if virtual_queue is None:
+        #     virtual_queue = VirtualQueue(log_dir=output_dir)
 
         super().__init__(
             input_dir=input_dir,

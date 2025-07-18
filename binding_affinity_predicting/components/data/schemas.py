@@ -187,6 +187,10 @@ class GromacsFepSimulationConfig(BaseModel):
         default_factory=list,
         description="List of shell commands to execute after running GROMACS",
     )
+    # Added by JJ-2025-05-05
+    mdrun_options: Optional[str] = Field(
+        None, description="Extra flags for 'gmx mdrun' (e.g., '-ntmpi 1 -ntomp 1')."
+    )
 
     @model_validator(mode="after")
     def ensure_same_length(cls, model):
@@ -240,100 +244,26 @@ class SomdFepSimulationConfig(BaseModel):
     Configuration for the λ-schedule used in bound and free legs.
     """
 
-    lambda_values: dict[LegType, dict[StageType, list[float]]] = Field(
-        default_factory=lambda: {
-            LegType.BOUND: {
-                StageType.RESTRAIN: [
-                    0.0,
-                    0.125,
-                    0.25,
-                    0.375,
-                    0.5,
-                    1.0,  # noqa: E127,E128,E131,E122,E501
-                ],
-                StageType.DISCHARGE: [
-                    0.0,
-                    0.143,
-                    0.286,
-                    0.429,
-                    0.571,
-                    0.714,
-                    0.857,
-                    1.0,  # noqa: E127,E128,E131,E122,E501
-                ],
-                StageType.VANISH: [
-                    0.0,
-                    0.025,
-                    0.05,
-                    0.075,
-                    0.1,
-                    0.125,
-                    0.15,
-                    0.175,
-                    0.2,
-                    0.225,  # noqa: E127,E128,E131,E122,E501
-                    0.25,
-                    0.275,
-                    0.3,
-                    0.325,
-                    0.35,
-                    0.375,
-                    0.4,
-                    0.425,
-                    0.45,
-                    0.475,  # noqa: E127,E128,E131,E122,E501
-                    0.5,
-                    0.525,
-                    0.55,
-                    0.575,
-                    0.6,
-                    0.625,
-                    0.65,
-                    0.675,
-                    0.7,
-                    0.725,  # noqa: E127,E128,E131,E122,E501
-                    0.75,  # noqa: E127,E128,E131,E122,E501
-                    0.8,
-                    0.85,
-                    0.9,
-                    0.95,
-                    1.0,  # noqa: E127,E128,E131,E122,E501
-                ],
-            },
-            LegType.FREE: {
-                StageType.DISCHARGE: [
-                    0.0,
-                    0.143,
-                    0.286,
-                    0.429,
-                    0.571,
-                    0.714,
-                    0.857,
-                    1.0,  # noqa: E127,E128,E131,E122,E501
-                ],
-                StageType.VANISH: [
-                    0.0,
-                    0.028,
-                    0.056,
-                    0.111,
-                    0.167,
-                    0.222,
-                    0.278,
-                    0.333,
-                    0.389,  # noqa: E127,E128,E131,E122,E501
-                    0.444,
-                    0.5,
-                    0.556,
-                    0.611,
-                    0.667,
-                    0.722,
-                    0.778,
-                    0.889,
-                    1.0,  # noqa: E127,E128,E131,E122,E501
-                ],
-            },
-        }
-    )
+    # fmt: off
+    lambda_values: dict[LegType, dict[StageType, list[float]]] = Field(default_factory=lambda: {
+        LegType.BOUND: {
+            StageType.RESTRAIN:  [0.0, 0.125, 0.25, 0.375, 0.5, 1.0],    # noqa: E127,E128,E131,E122,E501
+            StageType.DISCHARGE: [0.0, 0.143, 0.286, 0.429, 0.571, 0.714, 0.857, 1.0],   # noqa: E127,E128,E131,E122,E501
+            StageType.VANISH:    [    # noqa: E127,E128,E131,E122,E501
+                0.0, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225,   # noqa: E127,E128,E131,E122,E501
+                0.25, 0.275, 0.3, 0.325, 0.35, 0.375, 0.4, 0.425, 0.45, 0.475,   # noqa: E127,E128,E131,E122,E501
+                0.5, 0.525, 0.55, 0.575, 0.6, 0.625, 0.65, 0.675, 0.7, 0.725,    # noqa: E127,E128,E131,E122,E501
+                0.75, 0.8, 0.85, 0.9, 0.95, 1.0
+            ],
+        },
+        LegType.FREE: {
+            StageType.DISCHARGE: [0.0, 0.143, 0.286, 0.429, 0.571, 0.714, 0.857, 1.0],   # noqa: E127,E128,E131,E122,E501
+            StageType.VANISH:    [0.0, 0.028, 0.056, 0.111, 0.167, 0.222, 0.278, 0.333,   # noqa: E127,E128,E131,E122,E501
+                                0.389, 0.444, 0.5, 0.556, 0.611, 0.667, 0.722, 0.778,   # noqa: E127,E128,E131,E122,E501
+                                0.889, 1.0],   # noqa: E127,E128,E131,E122,E501
+        },
+    })
+    # fmt: on
     use_same_restraints: bool = Field(
         True,
         description="Whether to use the same restraints for all repeats of the bound leg. Note "

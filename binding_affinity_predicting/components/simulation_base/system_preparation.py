@@ -153,7 +153,7 @@ def _solvate_molecular_system_bss(
 def extract_restraint_from_traj(
     work_dir: str,
     trajectory_file: str,
-    topology_file: str,
+    topology_file: str,  # must be GROMACS TPR file for BSS compatibility
     system: BSS._SireWrappers._system.System,
     output_filename: Optional[str] = None,
     temperature: float = 300.0,
