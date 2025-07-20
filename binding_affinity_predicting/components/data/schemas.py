@@ -187,6 +187,10 @@ class GromacsFepSimulationConfig(BaseModel):
         default_factory=list,
         description="List of shell commands to execute after running GROMACS",
     )
+    gmx_exe: str = Field(
+        "gmx",
+        description="Path to the GROMACS executable (e.g., 'gmx' or '/path/to/gmx').",
+    )
     # Added by JJ-2025-05-05
     mdrun_options: Optional[str] = Field(
         None, description="Extra flags for 'gmx mdrun' (e.g., '-ntmpi 1 -ntomp 1')."

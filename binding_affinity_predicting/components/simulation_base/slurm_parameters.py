@@ -16,7 +16,6 @@ class SlurmParameters(BaseModel):
 
     # Basic SLURM parameters
     job_name: str = Field(default="gromacs_abfe", description="Job name")
-    partition: str = Field(default="gpu", description="SLURM partition")
     nodes: int = Field(default=1, ge=1, description="Number of nodes")
     ntasks_per_node: int = Field(default=1, ge=1, description="Tasks per node")
     cpus_per_task: int = Field(default=8, ge=1, description="CPUs per task")
@@ -161,7 +160,6 @@ class SlurmSubmitGenerator:
             "#!/bin/bash",
             "",
             f"#SBATCH --job-name={params.job_name}",
-            f"#SBATCH --partition={params.partition}",
             f"#SBATCH --nodes={params.nodes}",
             f"#SBATCH --ntasks-per-node={params.ntasks_per_node}",
             f"#SBATCH --cpus-per-task={params.cpus_per_task}",
@@ -277,10 +275,10 @@ class SlurmSubmitGenerator:
 
 
 def create_default_slurm_generator(
-    partition: str = "gpu", time: str = "24:00:00", mem: str = "16G"
+    time: str = "24:00:00", mem: str = "16G"
 ) -> SlurmSubmitGenerator:
     """Create SLURM generator with common defaults and Pydantic validation."""
-    params = SlurmParameters(partition=partition, time=time, mem=mem)
+    params = SlurmParameters(time=time, mem=mem)
     return SlurmSubmitGenerator(params)
 
 

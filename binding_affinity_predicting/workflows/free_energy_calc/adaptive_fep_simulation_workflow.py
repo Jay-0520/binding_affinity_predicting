@@ -167,6 +167,7 @@ class AdaptiveFepSimulationWorkflow:
             logger.warning(f"Could not check simulation success: {e}")
             return not self.calculation.failed
 
+    # TODO: we could implement a adpative feature here
     def _lambda_optimizing(
         self,
         run_nos: Optional[list[int]] = None,
@@ -276,7 +277,7 @@ class AdaptiveFepSimulationWorkflow:
 
     def run_complete_adaptive_workflow(
         self,
-        short_run_runtime: float = 2.0,
+        short_run_runtime: float = 2.0,  # 2ns; TODO: could be adaptive as well.
         initial_runtime_constant: float = 0.001,
         equilibration_method: str = "multiwindow",
         max_runtime_per_window: float = 30.0,
