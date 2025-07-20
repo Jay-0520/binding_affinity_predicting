@@ -246,6 +246,8 @@ class GromacsXVGParser:
                             col_idx += 1
 
                     # pV term (last column) and it must be present
+                    # must consider the work done by the system as its volume fluctuates
+                    #  under pressure (NPT ensemble)
                     if col_idx < len(parts):
                         pv_term = float(parts[col_idx])
                         pv_data.append(pv_term)
@@ -414,7 +416,7 @@ def load_alchemical_data(
             )
         logger.info(f"Saved parsed data to {save_to_path}")
 
-    logger.info("Successfully loaded alchemical data arrays")
+    logger.debug("Successfully loaded alchemical data arrays")
     return {
         'dhdl_timeseries': dhdl_timeseries,
         'potential_energies': potential_energies,
