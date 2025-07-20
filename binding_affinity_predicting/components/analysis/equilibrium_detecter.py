@@ -944,7 +944,7 @@ class EquilibriumDetectionManager:
 
 
 # Convenience functions for easy usage
-def detect_equilibrium(
+def run_equilibrium_detection(
     target: Union[LambdaWindow, Leg, Calculation, list[LambdaWindow]],
     method: str = "multiwindow",
     run_nos: Optional[list[int]] = None,
