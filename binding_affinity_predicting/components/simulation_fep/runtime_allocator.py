@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -21,6 +21,10 @@ class OptimalRuntimeAllocator:
     """
     Manager for adaptive runtime allocation in GROMACS FEP calculations.
 
+    This class can work with either:
+    1. Calculation objects (original behavior) - processes all legs
+    2. Leg objects (new behavior) - processes a single leg
+
     This class implements the adaptive efficiency algorithm from A3FE that
     automatically allocates simulation time to achieve maximal estimation
     efficiency of free energy differences.
@@ -28,7 +32,7 @@ class OptimalRuntimeAllocator:
 
     def __init__(
         self,
-        calculation: Calculation,
+        target: Union[Calculation, Leg],
         runtime_constant: float = 0.001,
         relative_simulation_cost: float = 1.0,
         max_runtime_per_window: float = 30.0,
@@ -40,8 +44,9 @@ class OptimalRuntimeAllocator:
 
         Parameters
         ----------
-        calculation : Calculation
-            GROMACS calculation object to manage
+        target : Union[Calculation, Leg]
+            Either a GROMACS calculation object (original behavior) or
+            a single Leg object (new leg-level behavior)
         runtime_constant : float, default 0.001
             The runtime_constant (kcal**2 mol**-2 ns*-1) only affects behaviour
             if running adaptively.
@@ -54,7 +59,25 @@ class OptimalRuntimeAllocator:
         cycle_pause : int, default 60
             Time to wait between status checks (seconds)
         """
-        self.calculation = calculation
+        if isinstance(target, Calculation):
+            self.calculation = target
+            self.single_leg = None
+            self.mode = "calculation"
+            self.target_name = "calculation"
+            self.legs_to_process = target.legs
+            logger.info("Initialized optimal runtime allocator for full calculation")
+        elif isinstance(target, Leg):
+            self.calculation = None  # type: ignore
+            self.single_leg = target
+            self.mode = "leg"
+            self.target_name = f"{target.leg_type.name.lower()}_leg"
+            self.legs_to_process = [target]
+            logger.info(
+                f"Initialized optimal runtime allocator for {target.leg_type.name} leg"
+            )
+        else:
+            raise ValueError("Target must be either a Calculation or a Leg object")
+
         self.runtime_constant = runtime_constant
         self.relative_simulation_cost = relative_simulation_cost
         self.max_runtime_per_window = max_runtime_per_window
@@ -68,9 +91,12 @@ class OptimalRuntimeAllocator:
         self._maximally_efficient = False
         self.kill_thread = False
 
-        logger.info("Initialized adaptive optimal runtime allocator with:")
+        logger.info(
+            f"Initialized adaptive optimal runtime allocator for {self.target_name}:"
+        )
         logger.info(f"  Runtime constant: {runtime_constant}")
         logger.info(f"  Max runtime per window: {max_runtime_per_window} ns")
+        logger.info(f"  Processing {len(self.legs_to_process)} leg(s)")
 
     def run_adaptive_efficiency_loop(self, run_nos: Optional[list[int]] = None) -> None:
         """
@@ -113,7 +139,7 @@ class OptimalRuntimeAllocator:
             # Analyze all legs for efficiency
             all_legs_efficient = True
 
-            for leg in self.calculation.legs:
+            for leg in self.legs_to_process:
                 leg_efficient = self._process_leg_for_efficiency(leg, run_nos)
                 if not leg_efficient:
                     all_legs_efficient = False
@@ -133,7 +159,14 @@ class OptimalRuntimeAllocator:
 
     def _wait_for_all_windows(self) -> None:
         """Wait for all lambda windows to finish their current simulations."""
-        logger.info("Waiting for all windows to complete current simulations...")
+        if self.mode == "calculation":
+            logger.info(
+                "Waiting for all windows in calculation to complete current simulations..."
+            )
+        else:
+            logger.info(
+                f"Waiting for all windows in {self.target_name} to complete current simulations..."
+            )
 
         while True:
             if self.kill_thread:
@@ -142,7 +175,7 @@ class OptimalRuntimeAllocator:
             # Check if any windows are still running
             any_running = False
 
-            for leg in self.calculation.legs:
+            for leg in self.legs_to_process:
                 for window in leg.lambda_windows:
                     if window.running:
                         any_running = True
@@ -155,8 +188,10 @@ class OptimalRuntimeAllocator:
                 break
 
             # Update virtual queue and wait
-            if self.calculation.virtual_queue:
+            if self.mode == "calculation" and self.calculation.virtual_queue:  # type: ignore
                 self.calculation.virtual_queue.update()
+            elif self.mode == "leg" and self.single_leg.virtual_queue:  # type: ignore
+                self.single_leg.virtual_queue.update()  # type: ignore
 
             logger.debug("Some windows still running, waiting...")
             time.sleep(self.cycle_pause)
@@ -327,18 +362,21 @@ class OptimalRuntimeAllocator:
         -------
         dict[str, Any]
             Dictionary containing key status information:
+            - 'target_name': Name of the target being processed
+            - 'mode': 'calculation' or 'leg'
             - 'is_maximally_efficient': Whether optimization is complete
             - 'runtime_constant': Current runtime constant value
             - 'total_windows': Total number of lambda windows
             - 'windows_running': Number of currently running windows
             - 'total_simulation_time': Total simulation time across all windows (ns)
+            - 'legs_processed': Number of legs being processed
         """
         # Count running windows and total simulation time
         total_windows = 0
         windows_running = 0
         total_simulation_time = 0.0
 
-        for leg in self.calculation.legs:
+        for leg in self.legs_to_process:
             for window in leg.lambda_windows:
                 total_windows += 1
                 if window.running:
@@ -346,17 +384,20 @@ class OptimalRuntimeAllocator:
                 total_simulation_time += window.get_tot_simulation_time([1])
 
         return {
+            'target_name': self.target_name,
+            'mode': self.mode,
             'is_maximally_efficient': self._maximally_efficient,
             'runtime_constant': self.runtime_constant,
             'total_windows': total_windows,
             'windows_running': windows_running,
             'total_simulation_time': total_simulation_time,
+            'legs_processed': len(self.legs_to_process),
         }
 
 
 # Convenience functions for easy usage
 def run_optimal_runtime_allocator(
-    calculation: Calculation,
+    target: Union[Calculation, Leg],
     runtime_constant: float = 0.001,
     max_runtime_per_window: float = 30.0,
     **kwargs,
@@ -366,7 +407,7 @@ def run_optimal_runtime_allocator(
 
     Parameters
     ----------
-    calculation : Calculation
+    target : Union[Calculation, Leg]
         GROMACS calculation object
     runtime_constant : float, default 0.001
         Runtime constant for efficiency optimization
@@ -380,8 +421,17 @@ def run_optimal_runtime_allocator(
     OptimalRuntimeAllocator
         Manager object for monitoring and control
     """
+    if isinstance(target, Calculation):
+        target_type = "calculation"
+    elif isinstance(target, Leg):
+        target_type = f"{target.leg_type.name} leg"
+    else:
+        raise ValueError("Target must be either a Calculation or Leg object")
+
+    logger.info(f"Starting optimal runtime allocation for {target_type}...")
+
     manager = OptimalRuntimeAllocator(
-        calculation=calculation,
+        target=target,
         runtime_constant=runtime_constant,
         max_runtime_per_window=max_runtime_per_window,
         **kwargs,
