@@ -8,7 +8,7 @@ simulation time allocation during equilibration.
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 
@@ -17,6 +17,7 @@ from binding_affinity_predicting.components.analysis.equilibrium_detecter import
 )
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
     Calculation,
+    Leg,
 )
 from binding_affinity_predicting.components.simulation_fep.runtime_allocator import (
     OptimalRuntimeAllocator,
@@ -39,7 +40,7 @@ class AdaptiveSimulationRunner:
 
     def __init__(
         self,
-        calculation: Calculation,
+        target: Union[Calculation, Leg],
         initial_runtime_constant: float = 0.001,
         equilibration_method: str = "multiwindow",
         max_runtime_per_window: float = 30.0,
@@ -52,8 +53,8 @@ class AdaptiveSimulationRunner:
 
         Parameters
         ----------
-        calculation : Calculation
-            GROMACS calculation object to manage
+        target : Union[Calculation, Leg]
+            Either a GROMACS calculation object or a single Leg object
         initial_runtime_constant : float, default 0.001
             The initial_runtime_constant (kcal**2 mol**-2 ns*-1) only affects behaviour if
             running adaptively. This is used to calculate how long to run each simulation for
@@ -75,7 +76,23 @@ class AdaptiveSimulationRunner:
         max_iterations : int, default 10
             Maximum number of equilibration iterations
         """
-        self.calculation = calculation
+        if isinstance(target, Calculation):
+            self.calculation = target
+            self.single_leg = None
+            self.mode = "calculation"
+            self.target_name = "calculation"
+            logger.info("Initialized adaptive simulation runner for full calculation")
+        elif isinstance(target, Leg):
+            self.calculation = None  # type: ignore[assignment]
+            self.single_leg = target
+            self.mode = "leg"
+            self.target_name = f"{target.leg_type.name.lower()}_leg"
+            logger.info(
+                f"Initialized adaptive simulation runner for {target.leg_type.name} leg"
+            )
+        else:
+            raise ValueError("Target must be either a Calculation or a Leg object")
+
         self.initial_runtime_constant = initial_runtime_constant
         self.current_runtime_constant = initial_runtime_constant
         self.equilibration_method = equilibration_method
@@ -89,9 +106,15 @@ class AdaptiveSimulationRunner:
             method=equilibration_method
         )
 
+        allocator_target: Union[Calculation, Leg]
+        if self.mode == "calculation":
+            allocator_target = self.calculation
+        else:
+            allocator_target = self.single_leg  # type: ignore[assignment]
+
         # Initialize runtime allocator
         self.optimal_runtime_allocator = OptimalRuntimeAllocator(
-            calculation=calculation,
+            target=allocator_target,
             runtime_constant=self.current_runtime_constant,
             max_runtime_per_window=max_runtime_per_window,
             use_hpc=self.use_hpc,
@@ -102,7 +125,7 @@ class AdaptiveSimulationRunner:
         self._iteration = 0
         self._equilibration_results: dict[str, Any] = {}
 
-        logger.info("Initialized adaptive simulation manager:")
+        logger.info(f"Initialized adaptive simulation manager for {self.target_name}:")
         logger.info(f"  Initial runtime constant: {initial_runtime_constant}")
         logger.info(f"  Equilibration method: {equilibration_method}")
         logger.info(f"  Max iterations: {max_iterations}")
@@ -128,7 +151,9 @@ class AdaptiveSimulationRunner:
             True if equilibration was achieved, False otherwise
         """
         logger.info("=" * 60)
-        logger.info("STARTING ADAPTIVE SIMULATION WORKFLOW")
+        logger.info(
+            f"STARTING ADAPTIVE SIMULATION WORKFLOW FOR {self.target_name.upper()}"
+        )
         logger.info("=" * 60)
 
         self._equilibrated = False
@@ -137,7 +162,9 @@ class AdaptiveSimulationRunner:
         while not self._equilibrated and self._iteration < self.max_iterations:
             self._iteration += 1
 
-            logger.info(f"*** EQUILIBRATION ITERATION {self._iteration} ***")
+            logger.info(
+                f"*** EQUILIBRATION ITERATION {self._iteration} FOR {self.target_name.upper()} ***"
+            )
             logger.info(f"Runtime constant: {self.current_runtime_constant}")
 
             # Step 1: Run adaptive efficiency optimization
@@ -167,10 +194,12 @@ class AdaptiveSimulationRunner:
 
                 if equilibration_achieved:
                     self._equilibrated = True
-                    logger.info("EQUILIBRATION ACHIEVED!")
+                    logger.info(
+                        f"EQUILIBRATION ACHIEVED FOR {self.target_name.upper()}!"
+                    )
                     break
                 else:
-                    logger.info("Equilibration not achieved")
+                    logger.info(f"Equilibration not achieved for {self.target_name}")
 
             except Exception as e:
                 logger.error(f"Equilibration detection failed: {e}")
@@ -181,18 +210,24 @@ class AdaptiveSimulationRunner:
                 logger.info("Step 3: Adjusting runtime constant for next iteration...")
                 self._adjust_runtime_constant()
             else:
-                logger.warning(f"Maximum iterations ({self.max_iterations}) reached")
+                logger.warning(
+                    f"Maximum iterations ({self.max_iterations}) reached for {self.target_name}. Stopping iteration."  # noqa: E501
+                )
 
         # Final status
         if self._equilibrated:
             logger.info("=" * 60)
-            logger.info("ADAPTIVE SIMULATION COMPLETED SUCCESSFULLY")
+            logger.info(
+                f"ADAPTIVE SIMULATION COMPLETED SUCCESSFULLY FOR {self.target_name.upper()}"
+            )
             logger.info(f"Final runtime constant: {self.current_runtime_constant}")
             logger.info(f"Iterations required: {self._iteration}")
             logger.info("=" * 60)
         else:
             logger.warning("=" * 60)
-            logger.warning("ADAPTIVE SIMULATION DID NOT CONVERGE")
+            logger.warning(
+                f"ADAPTIVE SIMULATION DID NOT CONVERGE FOR {self.target_name.upper()}"
+            )
             logger.warning(f"Stopped after {self._iteration} iterations")
             logger.warning("=" * 60)
 
@@ -205,28 +240,60 @@ class AdaptiveSimulationRunner:
         Uses the configured equilibration detection method on all legs.
         """
         logger.info(
-            f"Checking equilibration using {self.equilibration_method} method..."
+            f"Checking equilibration for {self.target_name} using {self.equilibration_method} method..."  # noqa: E501
         )
 
         try:
-            # Check equilibration for the entire calculation
-            all_results = self.detection_manager.detect_calculation_equilibrium(
-                calculation=self.calculation, run_nos=run_nos
-            )
+            if self.mode == "calculation":
+                # Check equilibration for the entire calculation
+                all_results = self.detection_manager.detect_calculation_equilibrium(
+                    calculation=self.calculation, run_nos=run_nos
+                )
 
-            self._equilibration_results = all_results
+                self._equilibration_results = all_results
 
-            # Determine if all legs are equilibrated
-            all_equilibrated = True
-            for leg_name, leg_results in all_results.items():
-                leg_equilibrated = all(
+                # Determine if all legs are equilibrated
+                all_equilibrated = True
+                for leg_name, leg_results in all_results.items():
+                    leg_equilibrated = all(
+                        result[0]
+                        for result in leg_results.values()  # result[0] is equilibrated bool
+                    )
+
+                    logger.info(f"{leg_name} leg equilibrated: {leg_equilibrated}")
+
+                    if leg_equilibrated:
+                        # Log equilibration details
+                        for window_name, (
+                            equilibrated,
+                            frac_equil_time,
+                        ) in leg_results.items():
+                            if frac_equil_time is not None:
+                                logger.info(
+                                    f" {window_name}: {frac_equil_time:.3f} fractional equilibration time"  # noqa: E501
+                                )
+
+                    if not leg_equilibrated:
+                        all_equilibrated = False
+
+                self._equilibration_results = all_results
+
+            else:
+                # check only the single leg
+                # In this case, single_leg cannot be None so we can silence the mypy warning
+                leg_results = self.detection_manager.detect_leg_equilibrium(
+                    leg=self.single_leg, run_nos=run_nos  # type: ignore[arg-type]
+                )
+
+                # Determine if this leg is equilibrated
+                all_equilibrated = all(
                     result[0]
                     for result in leg_results.values()  # result[0] is equilibrated bool
                 )
 
-                logger.info(f"{leg_name} leg equilibrated: {leg_equilibrated}")
+                logger.info(f"{self.target_name} equilibrated: {all_equilibrated}")
 
-                if leg_equilibrated:
+                if all_equilibrated:
                     # Log equilibration details
                     for window_name, (
                         equilibrated,
@@ -237,10 +304,12 @@ class AdaptiveSimulationRunner:
                                 f" {window_name}: {frac_equil_time:.3f} fractional equilibration time"  # noqa: E501
                             )
 
-                if not leg_equilibrated:
-                    all_equilibrated = False
+                # Store results in the same format as calculation mode for consistency
+                self._equilibration_results = {self.target_name: leg_results}
 
-            logger.info(f"Overall equilibration status: {all_equilibrated}")
+            logger.info(
+                f"Overall equilibration status for {self.target_name}: {all_equilibrated}"
+            )
             return all_equilibrated
 
         except Exception as e:
@@ -293,6 +362,8 @@ class AdaptiveSimulationRunner:
             Status information including equilibration results and efficiency metrics
         """
         status = {
+            'target_name': self.target_name,
+            'mode': self.mode,
             'equilibrated': self._equilibrated,
             'current_iteration': self._iteration,
             'max_iterations': self.max_iterations,
@@ -300,8 +371,7 @@ class AdaptiveSimulationRunner:
             'current_runtime_constant': self.current_runtime_constant,
             'equilibration_method': self.equilibration_method,
             'equilibration_results': self._equilibration_results,
-            # TODO: maybe better to add optimalruntime_status at some point
-            'optimalruntime_status': None,
+            'optimalruntime_status': self.optimal_runtime_allocator.get_allocator_status(),
         }
 
         return status
@@ -318,15 +388,22 @@ class AdaptiveSimulationRunner:
             Directory to save report. If None, uses calculation output directory.
         """
         if output_dir is None:
-            output_dir = self.calculation.output_dir
+            if self.mode == "calculation":
+                output_dir = self.calculation.output_dir
+            else:
+                # In this case, single_leg cannot be None so we can silence the mypy warning
+                output_dir = self.single_leg.output_dir  # type: ignore[union-attr]
 
-        output_path = Path(output_dir) / "adaptive_equilibration_report.txt"
+        output_path = (
+            Path(output_dir) / f"adaptive_equilibration_report_{self.target_name}.txt"
+        )
 
         with open(output_path, 'w') as f:
-            f.write("ADAPTIVE EQUILIBRATION REPORT\n")
-            f.write("=" * 40 + "\n\n")
+            f.write(f"ADAPTIVE EQUILIBRATION REPORT - {self.target_name.upper()}\n")
+            f.write("=" * 60 + "\n\n")
 
             # Key results
+            f.write(f"Target: {self.target_name} ({self.mode} mode)\n")
             f.write(f"Equilibration achieved: {self._equilibrated}\n")
             f.write(f"Iterations completed: {self._iteration}\n")
             f.write(f"Initial runtime constant: {self.initial_runtime_constant:.6f}\n")
@@ -337,11 +414,39 @@ class AdaptiveSimulationRunner:
             if self._equilibration_results:
                 f.write("EQUILIBRATION STATUS:\n")
                 f.write("-" * 25 + "\n")
-                for leg_name, leg_results in self._equilibration_results.items():
+
+                if self.mode == "calculation":
+                    # Multiple legs
+                    for leg_name, leg_results in self._equilibration_results.items():
+                        all_equilibrated = all(
+                            result[0] for result in leg_results.values()
+                        )
+                        f.write(
+                            f"{leg_name} leg: {'EQUILIBRATED' if all_equilibrated else 'NOT EQUILIBRATED'}\n"  # noqa: E501
+                        )
+                        for window_name, (
+                            equilibrated,
+                            frac_equil_time,
+                        ) in leg_results.items():
+                            if frac_equil_time is not None:
+                                f.write(
+                                    f"  {window_name}: {frac_equil_time:.3f} fractional time\n"
+                                )
+                else:
+                    # Single leg
+                    leg_results = self._equilibration_results[self.target_name]
                     all_equilibrated = all(result[0] for result in leg_results.values())
                     f.write(
-                        f"{leg_name} leg: {'EQUILIBRATED' if all_equilibrated else 'NOT EQUILIBRATED'}\n"  # noqa: E501
+                        f"{self.target_name}: {'EQUILIBRATED' if all_equilibrated else 'NOT EQUILIBRATED'}\n"  # noqa: E501
                     )
+                    for window_name, (
+                        equilibrated,
+                        frac_equil_time,
+                    ) in leg_results.items():
+                        if frac_equil_time is not None:
+                            f.write(
+                                f"  {window_name}: {frac_equil_time:.3f} fractional time\n"
+                            )
 
             # Efficiency status
             efficiency_status = self.optimal_runtime_allocator.get_allocator_status()
@@ -356,7 +461,7 @@ class AdaptiveSimulationRunner:
 
 
 def run_adaptive_simulations(
-    calculation: Calculation,
+    target: Union[Calculation, Leg],
     initial_runtime_constant: float = 0.001,
     equilibration_method: str = "multiwindow",
     max_runtime_per_window: float = 30.0,
@@ -365,7 +470,8 @@ def run_adaptive_simulations(
     **kwargs,
 ) -> AdaptiveSimulationRunner:
     """
-    Convenience function to run the complete adaptive simulation workflow.
+    Convenience function to run the complete adaptive simulation workflow
+      for a GROMACS calculation or leg.
 
     Parameters
     ----------
@@ -389,11 +495,18 @@ def run_adaptive_simulations(
     AdaptiveSimulationManager
         Manager object with results
     """
-    logger.info("Starting adaptive simulation workflow...")
+    if isinstance(target, Calculation):
+        target_type = "calculation"
+    elif isinstance(target, Leg):
+        target_type = f"{target.leg_type.name} leg"
+    else:
+        raise ValueError("Target must be either a Calculation or Leg object")
+
+    logger.info(f"Starting adaptive simulation workflow for {target_type}...")
 
     # Create and run the manager
     manager = AdaptiveSimulationRunner(
-        calculation=calculation,
+        target=target,
         initial_runtime_constant=initial_runtime_constant,
         equilibration_method=equilibration_method,
         max_runtime_per_window=max_runtime_per_window,

@@ -404,6 +404,7 @@ def run_optimal_runtime_allocator(
 ) -> OptimalRuntimeAllocator:
     """
     Convenience function to run optimal runtime allocator.
+      for a GROMACS Calculation or Leg object.
 
     Parameters
     ----------
