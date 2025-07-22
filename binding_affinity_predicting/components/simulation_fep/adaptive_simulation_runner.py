@@ -8,7 +8,7 @@ simulation time allocation during equilibration.
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 
@@ -16,7 +16,7 @@ from binding_affinity_predicting.components.analysis.equilibrium_detecter import
     EquilibriumDetectionManager,
 )
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
-    Calculation,
+    Calculation, Leg,
 )
 from binding_affinity_predicting.components.simulation_fep.runtime_allocator import (
     OptimalRuntimeAllocator,
@@ -30,8 +30,13 @@ class AdaptiveSimulationRunner:
     """
     Manager for adaptive equilibration with efficiency optimization.
 
+
+    This class can work with either:
+    1. Calculation objects (original behavior) - processes all legs
+    2. Leg objects (new behavior) - processes a single leg
+
     This class implements the adaptive equilibration algorithm that:
-    1. Runs simulations with efficiency optimization
+    1. Runs simulations with efficiency optimization (aka, allocates optimal runtime)
     2. Checks for equilibration using multiwindow detection
     3. Adjusts runtime constant and re-optimizes if not equilibrated
     4. Continues until equilibration is achieved
@@ -39,7 +44,7 @@ class AdaptiveSimulationRunner:
 
     def __init__(
         self,
-        calculation: Calculation,
+        target: Union[Calculation, Leg],
         initial_runtime_constant: float = 0.001,
         equilibration_method: str = "multiwindow",
         max_runtime_per_window: float = 30.0,
@@ -52,8 +57,9 @@ class AdaptiveSimulationRunner:
 
         Parameters
         ----------
-        calculation : Calculation
-            GROMACS calculation object to manage
+        target : Union[Calculation, Leg]
+            Either a GROMACS calculation object (original behavior) or 
+            a single Leg object (new leg-level behavior)
         initial_runtime_constant : float, default 0.001
             The initial_runtime_constant (kcal**2 mol**-2 ns*-1) only affects behaviour if
             running adaptively. This is used to calculate how long to run each simulation for
@@ -75,7 +81,21 @@ class AdaptiveSimulationRunner:
         max_iterations : int, default 10
             Maximum number of equilibration iterations
         """
-        self.calculation = calculation
+        if isinstance(target, Calculation):
+            self.calculation = target
+            self.single_leg = None
+            self.mode = "calculation"
+            self.target_name = "calculation"
+            logger.info("Initialized adaptive simulation runner for full calculation")
+        elif isinstance(target, Leg):
+            self.calculation = None
+            self.single_leg = target
+            self.mode = "leg"
+            self.target_name = f"{target.leg_type.name.lower()}_leg"
+            logger.info(f"Initialized adaptive simulation runner for {target.leg_type.name} leg")
+        else:
+            raise ValueError("Target must be either a Calculation or a Leg object")
+    
         self.initial_runtime_constant = initial_runtime_constant
         self.current_runtime_constant = initial_runtime_constant
         self.equilibration_method = equilibration_method
