@@ -1,6 +1,9 @@
 import numpy as np
 import pytest
 
+from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
+    Calculation,
+)
 from binding_affinity_predicting.components.simulation_fep.runtime_allocator import (
     OptimalRuntimeAllocator,
 )
@@ -10,7 +13,7 @@ from binding_affinity_predicting.components.simulation_fep.runtime_allocator imp
 def mock_calculation(mocker):
     """Create a mock Calculation with legs and lambda windows"""
     # Create mock calculation
-    mock_calculation = mocker.MagicMock()
+    mock_calculation = mocker.MagicMock(spec=Calculation)
 
     # Create mock leg
     mock_leg = mocker.MagicMock()
@@ -61,7 +64,7 @@ def mock_dependencies(mocker):
 def allocator(mock_calculation, mock_gradient_analyzer, mock_dependencies):
     """Create an AdaptiveRuntimeAllocator with mocked dependencies"""
     allocator = OptimalRuntimeAllocator(
-        calculation=mock_calculation,
+        target=mock_calculation,
         runtime_constant=0.001,
         cycle_pause=0.1,  # Very short pause for testing
     )
