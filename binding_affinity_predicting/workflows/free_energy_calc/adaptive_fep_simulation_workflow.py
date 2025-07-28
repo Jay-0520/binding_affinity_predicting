@@ -8,16 +8,14 @@ adaptive equilibration, and lambda optimization for GROMACS FEP calculations.
 import logging
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
-from binding_affinity_predicting.components.data.schemas import (
-    GromacsFepSimulationConfig,
-)
 from binding_affinity_predicting.components.simulation_fep.adaptive_simulation_runner import (
     AdaptiveSimulationRunner,
 )
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
     Calculation,
+    Leg,
 )
 from binding_affinity_predicting.components.simulation_fep.lambda_optimizer import (
     LambdaOptimizationManager,
@@ -31,17 +29,40 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class AdaptiveFepSimulationWorkflow:
+class LegToCalculationWrapper:
     """
-    High-level manager for adaptive FEP workflows.
+    Minimal wrapper to make a Leg compatible with StatusMonitor.
+    This is used internally when creating status monitors for individual legs.
+    """
+
+    def __init__(self, leg: Leg):
+        self._sub_sim_runners = [leg]
+        self.output_dir = leg.output_dir
+        self.virtual_queue = leg.virtual_queue
+
+    @property
+    def running(self) -> bool:
+        return self._sub_sim_runners[0].running
+
+    @property
+    def failed(self) -> bool:
+        return self._sub_sim_runners[0].failed
+
+
+class AdaptiveFepSimulationLegLevelWorkflow:
+    """
+    Leg-level manager for adaptive FEP workflows.
 
     This class provides a unified interface for running various adaptive
-    optimization strategies for GROMACS FEP calculations.
+    optimization strategies for a SINGLE GROMACS FEP leg.
+
+    For processing multiple legs, create multiple instances of this class
+    or use the CalculationAdaptiveFepOrchestrator.
     """
 
     def __init__(
         self,
-        calculation: Calculation,
+        leg: Leg,
         enable_monitoring: bool = True,
         use_hpc: bool = True,
         run_sync: bool = True,
@@ -52,10 +73,19 @@ class AdaptiveFepSimulationWorkflow:
 
         Parameters
         ----------
-        calculation : Calculation
-            GROMACS calculation object to manage
+        leg : Leg
+            GROMACS leg object to manage
+        enable_monitoring : bool, default True
+            Whether to enable status monitoring
+        use_hpc : bool, default True
+            Whether to use HPC for simulations
+        run_sync : bool, default True
+            Whether to run synchronously
+        skip_completed_phases : bool, default True
+            Whether to skip completed phases (resume functionality)
         """
-        self.calculation = calculation
+        self.leg = leg
+        self.leg_name = leg.leg_type.name.lower()
         self.workflow_results: dict[str, Any] = {}
         self._last_workflow_results: dict[str, Any] = {}
         self.enable_monitoring = enable_monitoring
@@ -66,17 +96,21 @@ class AdaptiveFepSimulationWorkflow:
         self.status_monitor: Optional[StatusMonitor]
         # Initialize status monitor
         if self.enable_monitoring:
-            self.status_monitor = StatusMonitor(self.calculation)
-            logger.info("Status monitoring enabled")
+            # Create a temporary calculation wrapper for the status monitor
+            temp_calc = LegToCalculationWrapper(self.leg)
+            self.status_monitor = StatusMonitor(cast(Calculation, temp_calc))
+            logger.info(f"{self.leg_name} leg - Status monitoring enabled")
         else:
             self.status_monitor = None
-            logger.info("Status monitoring disabled")
+            logger.info(f"{self.leg_name} leg - Status monitoring disabled")
 
         # Resume functionality attributes
         self.workflow_state_file = (
-            Path(self.calculation.output_dir) / "workflow_completed_phases.txt"
+            Path(self.leg.output_dir) / f"{self.leg_name}_workflow_completed_phases.txt"
         )
         self.completed_phases = self._load_completed_phases()
+
+        logger.info(f"Initialized adaptive FEP workflow for {self.leg_name} leg")
 
     def _load_completed_phases(self) -> set[str]:
         """
@@ -156,7 +190,7 @@ class AdaptiveFepSimulationWorkflow:
         """Check if simulations completed successfully using StatusMonitor."""
         if not self.status_monitor:
             # Fallback to calculation.failed if monitoring is disabled
-            return not self.calculation.failed
+            return not self.leg.failed
 
         try:
             status = self.status_monitor.get_status()
@@ -165,7 +199,7 @@ class AdaptiveFepSimulationWorkflow:
             return failed_count == 0
         except Exception as e:
             logger.warning(f"Could not check simulation success: {e}")
-            return not self.calculation.failed
+            return not self.leg.failed
 
     # TODO: we could implement a adpative feature here
     def _lambda_optimizing(
@@ -201,26 +235,36 @@ class AdaptiveFepSimulationWorkflow:
 
         manager = LambdaOptimizationManager(config=optimization_config)
 
-        optimization_results = manager.optimize_calculation(
-            calculation=self.calculation,
+        optimization_result = manager.optimizer.optimize(
+            lambda_windows=self.leg.lambda_windows,
+            leg_type=self.leg.leg_type,
             run_nos=run_nos,
             equilibrated=equilibrated,
-            apply_results=apply_optimization,
         )
+        success = optimization_result.success
+        applied = False
 
-        # Summarize results
-        successful_legs = sum(
-            1 for result in optimization_results.values() if result.success
-        )
-        total_legs = len(optimization_results)
+        if success and apply_optimization:
+            try:
+                logger.info(f"{self.leg_name} leg - applying optimization results...")
+                manager._apply_to_leg(
+                    self.leg, optimization_result, backup_original=True
+                )
+                applied = True
+                logger.info(f"{self.leg_name} leg - optimization applied successfully")
+            except Exception as e:
+                logger.error(f"{self.leg_name} leg - failed to apply optimization: {e}")
+                success = False
 
         results = {
             'type': 'lambda_optimizing',
-            'successful': successful_legs == total_legs,
-            'successful_legs': successful_legs,
-            'total_legs': total_legs,
-            'applied': apply_optimization,
-            'optimization_results': optimization_results,
+            'leg_name': self.leg_name,
+            'successful': success,
+            'applied': applied,
+            'optimization_result': optimization_result,
+            'improvement_factor': (
+                optimization_result.overall_improvement if success else 1.0
+            ),
         }
 
         self.workflow_results['lambda_optimizing'] = results
@@ -231,11 +275,13 @@ class AdaptiveFepSimulationWorkflow:
         initial_runtime_constant: float = 0.001,
         equilibration_method: str = "multiwindow",
         max_runtime_per_window: float = 30.0,
+        max_iterations: int = 10,
         run_nos: Optional[list[int]] = None,
-        use_hpc: bool = True,
+        # use_hpc: bool = True,
     ) -> dict[str, Any]:
         """
-        Run adaptive simulation workflow (equilibration + efficiency optimization).
+        Run adaptive simulation workflow (equilibration + efficiency optimization)
+          for this leg.
 
         Parameters
         ----------
@@ -253,26 +299,28 @@ class AdaptiveFepSimulationWorkflow:
         dict
             Results from simulation workflow
         """
-        logger.info("Running Adaptive Simulation Workflow...")
+        logger.info(f"{self.leg_name} leg - Running Adaptive Simulation Protocol...")
 
         manager = AdaptiveSimulationRunner(
-            calculation=self.calculation,
+            target=self.leg,
             initial_runtime_constant=initial_runtime_constant,
             equilibration_method=equilibration_method,
             max_runtime_per_window=max_runtime_per_window,
-            use_hpc=use_hpc,
+            max_iterations=max_iterations,
+            use_hpc=self.use_hpc,
         )
-        _ = manager.run_simulation(run_nos=run_nos)
+        success = manager.run_simulation(run_nos=run_nos)
 
         results = {
-            'type': 'adaptive_simulation_workflow',
-            'successful': manager.is_equilibrated,
+            'type': 'adaptive_simulation_protocol',
+            'leg_name': self.leg_name,
+            'successful': success,
             'iterations': manager.current_iteration,
             'final_runtime_constant': manager.current_runtime_constant,
             'status': manager.get_simulation_status(),
         }
 
-        self.workflow_results['adaptive_simulation'] = results
+        self.workflow_results['adaptive_simulation_protocol'] = results
         return results
 
     def run_complete_adaptive_workflow(
@@ -287,7 +335,7 @@ class AdaptiveFepSimulationWorkflow:
         force_rerun_phases: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """
-        Run the complete adaptive FEP workflow with simple monitoring.
+        Run the complete adaptive FEP workflow for this leg with simple monitoring.
 
         This workflow implements the following sequence:
         1. Short simulations for gradient collection
@@ -318,35 +366,44 @@ class AdaptiveFepSimulationWorkflow:
         dict
             Comprehensive results from all workflow phases
         """
-        logger.info("🚀 Running Complete Adaptive FEP Workflow (BAB Protocol)...")
+        logger.info(
+            f"🚀 {self.leg_name.upper()} LEG - Running Complete Adaptive FEP Workflow (BAB Protocol)..."  # noqa: E501
+        )
         logger.info("=" * 70)
 
         # Handle force rerun
         if force_rerun_phases:
             for phase in force_rerun_phases:
                 if phase in self.completed_phases:
-                    logger.info(f"Forcing rerun of phase: {phase}")
+                    logger.info(
+                        f"{self.leg_name} leg - forcing rerun of phase: {phase}"
+                    )
                     self.completed_phases.discard(phase)
 
         # Print resume information
         if self.skip_completed_phases and self.completed_phases:
             logger.info(
-                f"Resume mode enabled. Previously completed phases: {self.completed_phases}"
+                f"{self.leg_name} leg - Resume mode enabled. Previously completed phases: {self.completed_phases}"  # noqa: E501
             )
         elif self.skip_completed_phases:
-            logger.info("Resume mode enabled. No previously completed phases found.")
+            logger.info(
+                f"{self.leg_name} leg - Resume mode enabled. No previously completed phases found."
+            )
         else:
-            logger.info("Resume mode disabled. All phases will be executed.")
+            logger.info(
+                f"{self.leg_name} leg - Resume mode disabled. All phases will be executed."
+            )
 
         workflow_results: dict[str, Any] = {
-            'workflow_type': 'complete_adaptive_fep_workflow_BAB',
+            'workflow_type': f'complete_adaptive_fep_workflow_leg_{self.leg_name}',
+            'leg_name': self.leg_name,
+            'leg_type': self.leg.leg_type.name,
             'phases_completed': [],
             'phases_skipped': [],
             'overall_successful': False,
             'phase_results': {},
             'resume_enabled': self.skip_completed_phases,
         }
-
         try:
             # ==========================================================
             # Phase 1: Short simulations for gradient collection
@@ -354,63 +411,77 @@ class AdaptiveFepSimulationWorkflow:
             phase1_name = 'short_simulations'
 
             if self._is_phase_completed(phase1_name):
-                logger.info("PHASE 1: SHORT SIMULATIONS (SKIPPED - ALREADY COMPLETED)")
+                logger.info(
+                    f"{self.leg_name} leg - PHASE 1: SHORT SIMULATIONS (SKIPPED - ALREADY COMPLETED)"  # noqa: E501
+                )
                 logger.info("=" * 50)
-                logger.info("Using existing short simulation results")
+                logger.info(
+                    f"{self.leg_name} leg - Using existing short simulation results"
+                )
 
                 short_sim_results = {
                     'type': 'short_simulations',
+                    'leg_name': self.leg_name,
                     'runtime': short_run_runtime,
                     'successful': True,
                     'skipped': True,
                     'reason': 'Previously completed',
                 }
-
-                workflow_results['phases_skipped'].append(phase1_name)
+                cast(list[str], workflow_results['phases_skipped']).append(phase1_name)
                 workflow_results['phase_results'][phase1_name] = short_sim_results
 
             else:
-                logger.info("PHASE 1: SHORT SIMULATIONS FOR GRADIENT COLLECTION")
+                logger.info(
+                    f"{self.leg_name} leg - PHASE 1: SHORT SIMULATIONS FOR GRADIENT COLLECTION"
+                )
                 logger.info("=" * 50)
                 logger.info(
-                    f"Running {short_run_runtime} ns simulations for lambda optimization..."
+                    f"{self.leg_name} leg - Running {short_run_runtime} ns simulations for lambda optimization..."  # noqa: E501
                 )
 
-                # Run short simulations
-                self.calculation.run(
+                # Run short simulations on this leg only
+                self.leg.run(
                     runtime=short_run_runtime,
                     use_hpc=self.use_hpc,
-                    run_sync=self.run_sync,
                 )
 
                 # Show initial status after starting simulations
                 if self.enable_monitoring:
-                    logger.info("Phase 1 started, checking initial status...")
+                    logger.info(
+                        f"{self.leg_name} leg - Phase 1 started, checking initial status..."
+                    )
                     self._print_simple_status()
 
                 # Wait for completion
-                logger.info("Waiting for short simulations to complete...")
-                self._wait_for_calculation(check_interval=monitor_interval)
+                logger.info(
+                    f"{self.leg_name} leg - Waiting for short simulations to complete..."
+                )
+                self._wait_for_leg(check_interval=monitor_interval)
 
                 short_sim_results = {
                     'type': 'short_simulations',
+                    'leg_name': self.leg_name,
                     'runtime': short_run_runtime,
                     'successful': self._check_simulation_success(),
                     'skipped': False,
                 }
 
                 if not short_sim_results['successful']:
-                    logger.error("Short simulations failed. Stopping workflow.")
+                    logger.error(
+                        f"{self.leg_name} leg - Short simulations failed. Stopping workflow."
+                    )
                     if self.enable_monitoring:
                         self._print_simple_status()  # Show final status
                     workflow_results['phase_results'][phase1_name] = short_sim_results
                     return workflow_results
 
                 logger.info(
-                    f"Short simulations completed successfully ({short_run_runtime} ns)"
+                    f"{self.leg_name} leg - Short simulations completed successfully ({short_run_runtime} ns)"  # noqa: E501
                 )
 
-                workflow_results['phases_completed'].append(phase1_name)
+                cast(list[str], workflow_results['phases_completed']).append(
+                    phase1_name
+                )
                 workflow_results['phase_results'][phase1_name] = short_sim_results
 
                 # Mark phase as completed
@@ -424,23 +495,29 @@ class AdaptiveFepSimulationWorkflow:
             if optimize_lambda_spacing:
                 if self._is_phase_completed(phase2_name):
                     logger.info(
-                        "PHASE 2: LAMBDA OPTIMIZATION (SKIPPED - ALREADY COMPLETED)"
+                        f"{self.leg_name} leg - PHASE 2: LAMBDA OPTIMIZATION (SKIPPED - ALREADY COMPLETED)"  # noqa: E501
                     )
                     logger.info("=" * 50)
 
                     optimization_results = {
                         'type': 'lambda_optimizing',
+                        'leg_name': self.leg_name,
                         'successful': True,
+                        'applied': True,
                         'skipped': True,
                         'reason': 'Previously completed',
                     }
 
-                    workflow_results['phases_skipped'].append(phase2_name)
+                    cast(list[str], workflow_results['phases_skipped']).append(
+                        phase2_name
+                    )
                     workflow_results['phase_results'][
                         phase2_name
                     ] = optimization_results
                 else:
-                    logger.info("PHASE 2: LAMBDA SPACING OPTIMIZATION")
+                    logger.info(
+                        f"{self.leg_name} leg - PHASE 2: LAMBDA SPACING OPTIMIZATION"
+                    )
                     logger.info("=" * 50)
 
                     optimization_results = self._lambda_optimizing(
@@ -455,20 +532,22 @@ class AdaptiveFepSimulationWorkflow:
 
                     if optimization_results['successful']:
                         logger.info(
-                            "Lambda spacing optimization completed successfully"
+                            f"{self.leg_name} leg - Lambda spacing optimization completed successfully"  # noqa: E501
                         )
                         logger.info(
-                            "Calculation has been updated with optimized lambda values"
+                            f"{self.leg_name} leg - Leg has been updated with optimized lambda values"  # noqa: E501
                         )
-                        workflow_results['phases_completed'].append(phase2_name)
+                        cast(list[str], workflow_results['phases_completed']).append(
+                            phase2_name
+                        )
                         self._save_completed_phase(phase2_name)
                     else:
                         logger.warning(
-                            "Lambda optimization had issues, continuing with original lambda values..."  # noqa: E501
+                            f"{self.leg_name} leg - Lambda optimization had issues, continuing with original lambda values..."  # noqa: E501
                         )
             else:
                 logger.info(
-                    "SKIPPING PHASE 2 LAMBDA OPTIMIZATION (optimize_lambda_spacing=False)"
+                    f"{self.leg_name} leg - SKIPPING PHASE 2 LAMBDA OPTIMIZATION (optimize_lambda_spacing=False)"  # noqa: E501
                 )
 
             # ===================================================================================
@@ -478,22 +557,23 @@ class AdaptiveFepSimulationWorkflow:
 
             if self._is_phase_completed(phase3_name):
                 logger.info(
-                    "PHASE 3: PRODUCTION ADAPTIVE (SKIPPED - ALREADY COMPLETED)"
+                    f"{self.leg_name} leg - PHASE 3: PRODUCTION ADAPTIVE (SKIPPED - ALREADY COMPLETED)"  # noqa: E501
                 )
                 logger.info("=" * 50)
 
                 production_results = {
                     'type': 'adaptive_simulation_workflow',
+                    'leg_name': self.leg_name,
                     'successful': True,
                     'skipped': True,
                     'reason': 'Previously completed',
                 }
 
-                workflow_results['phases_skipped'].append(phase3_name)
+                cast(list[str], workflow_results['phases_skipped']).append(phase3_name)
                 workflow_results['phase_results'][phase3_name] = production_results
             else:
                 logger.info(
-                    "PHASE 3: PRODUCTION WITH ADAPTIVE EQUILIBRATION & EFFICIENCY"
+                    f"{self.leg_name} leg - PHASE 3: PRODUCTION WITH ADAPTIVE EQUILIBRATION & EFFICIENCY"  # noqa: E501
                 )
                 logger.info("=" * 50)
 
@@ -503,17 +583,22 @@ class AdaptiveFepSimulationWorkflow:
                     equilibration_method=equilibration_method,
                     max_runtime_per_window=max_runtime_per_window,
                     run_nos=run_nos,
-                    use_hpc=self.use_hpc,
                 )
 
                 workflow_results['phase_results'][phase3_name] = production_results
 
                 if production_results['successful']:
-                    logger.info("Production adaptive simulation completed successfully")
-                    workflow_results['phases_completed'].append(phase3_name)
+                    logger.info(
+                        f"{self.leg_name} leg - Production adaptive simulation completed successfully"  # noqa: E501
+                    )
+                    cast(list[str], workflow_results['phases_completed']).append(
+                        phase3_name
+                    )
                     self._save_completed_phase(phase3_name)
                 else:
-                    logger.warning("Production adaptive simulation had issues")
+                    logger.warning(
+                        f"{self.leg_name} leg - Production adaptive simulation had issues"
+                    )
 
             # ===================================================================================
             # Tracking overall success and summary statistics
@@ -527,19 +612,22 @@ class AdaptiveFepSimulationWorkflow:
                     workflow_results['phases_completed']
                     + workflow_results['phases_skipped']
                 )
-                and workflow_results['phase_results'][phase].get('successful', False)
+                and cast(dict[str, bool], workflow_results['phase_results'][phase]).get(
+                    'successful', False
+                )
                 for phase in required_phases
             )
-
             # Summary statistics
             total_runtime = 0
             if 'short_simulations' in workflow_results['phase_results']:
-                short_results = workflow_results['phase_results']['short_simulations']
+                short_results: dict[str, Any] = workflow_results['phase_results'][
+                    'short_simulations'
+                ]
                 if not short_results.get('skipped', False):
                     total_runtime += short_results.get('runtime', 0)
 
             if 'production_adaptive' in workflow_results['phase_results']:
-                production_status = workflow_results['phase_results'][
+                production_status: dict[str, Any] = workflow_results['phase_results'][
                     'production_adaptive'
                 ].get('status', {})
                 if 'optimalruntime_status' in production_status:
@@ -548,11 +636,12 @@ class AdaptiveFepSimulationWorkflow:
                         total_runtime += runtime_status['total_simulation_time']
 
             workflow_results['summary'] = {
+                'leg_name': self.leg_name,
                 'total_runtime': total_runtime,
                 'lambda_optimization_applied': (
                     optimize_lambda_spacing
                     and workflow_results['phase_results']
-                    .get('lambda_optimization', {})
+                    .get('lambda_optimizing', {})
                     .get('applied', False)
                 ),
                 'final_runtime_constant': (
@@ -569,23 +658,26 @@ class AdaptiveFepSimulationWorkflow:
             }
 
         except Exception as e:
-            logger.error(f"Workflow failed with exception: {e}")
+            logger.error(f"{self.leg_name} leg - Workflow failed with exception: {e}")
             workflow_results['error'] = str(e)
 
         # Final summary
         logger.info("\n" + "=" * 70)
         if workflow_results['overall_successful']:
-            logger.info("🎉 COMPLETE ADAPTIVE WORKFLOW (A3FE) FINISHED SUCCESSFULLY")
-
+            logger.info(
+                f"🎉 {self.leg_name.upper()} LEG - COMPLETE ADAPTIVE WORKFLOW FINISHED SUCCESSFULLY"
+            )
         else:
-            logger.warning("⚠️ WORKFLOW COMPLETED WITH SOME ISSUES")
+            logger.warning(
+                f"⚠️ {self.leg_name.upper()} LEG - WORKFLOW COMPLETED WITH SOME ISSUES"
+            )
 
         logger.info(
-            f"Phases completed: {', '.join(workflow_results['phases_completed'])}"
+            f"{self.leg_name} leg - Phases completed: {', '.join(workflow_results['phases_completed'])}"  # noqa: E501
         )
         if workflow_results['phases_skipped']:
             logger.info(
-                f"Phases skipped: {', '.join(workflow_results['phases_skipped'])}"
+                f"{self.leg_name} leg - Phases skipped: {', '.join(workflow_results['phases_skipped'])}"  # noqa: E501
             )
         logger.info("=" * 70)
 
@@ -595,20 +687,21 @@ class AdaptiveFepSimulationWorkflow:
 
         return workflow_results
 
-    def _wait_for_calculation(self, check_interval: int = 60) -> None:
+    def _wait_for_leg(self, check_interval: int = 60) -> None:
         """Wait for calculation to complete with status monitoring."""
-        if self.calculation.virtual_queue:
+        logger.info(f"{self.leg_name} leg - waiting for simulations to complete...")
+
+        if self.leg.virtual_queue:
             logger.info(
                 "calc virtual_queue is not None; waiting for simulations to complete..."
             )
-
-            while self.calculation.running:
+            while self.leg.running:
                 # Print status during waiting if monitoring is enabled
                 if self.enable_monitoring:
                     self._print_simple_status()
 
                 time.sleep(check_interval)
-                self.calculation.virtual_queue.update()
+                self.leg.virtual_queue.update()
 
         else:
             # For local runs, just use a simple wait
@@ -616,15 +709,17 @@ class AdaptiveFepSimulationWorkflow:
             while True:
                 if self.enable_monitoring:
                     self._print_simple_status()
-                if not self.calculation.running:
+                if not self.leg.running:
                     logger.info("Local simulations completed")
                     break
                 time.sleep(check_interval)
 
         if self._check_simulation_success():
-            logger.info("✅ All simulations completed successfully")
+            logger.info(
+                f"✅ {self.leg_name} leg - All simulations completed successfully"
+            )
         else:
-            logger.warning("⚠️ Some simulations failed")
+            logger.warning(f"⚠️ {self.leg_name} leg - Some simulations failed")
 
     def save_workflow_report(self, output_dir: Optional[str] = None) -> None:
         """
@@ -636,25 +731,31 @@ class AdaptiveFepSimulationWorkflow:
             Directory to save report
         """
         if output_dir is None:
-            output_dir = self.calculation.output_dir
+            output_dir = self.leg.output_dir
 
-        output_path = Path(output_dir) / "adaptive_fep_workflow_report.txt"
+        output_path = (
+            Path(output_dir) / f"adaptive_fep_workflow_report_{self.leg_name}_leg.txt"
+        )
 
         # Get the latest workflow results from the last run
         if (
             not hasattr(self, '_last_workflow_results')
             or not self._last_workflow_results
         ):
-            logger.warning("No workflow results available for report generation")
+            logger.warning(
+                f"{self.leg_name} leg - No workflow results available for report generation"
+            )
             return
 
         results = self._last_workflow_results
 
         with open(output_path, 'w') as f:
-            f.write("ADAPTIVE FEP WORKFLOW REPORT\n")
+            f.write(f"ADAPTIVE FEP WORKFLOW REPORT - {self.leg_name.upper()} LEG\n")
             f.write("=" * 60 + "\n\n")
 
             # Write workflow metadata
+            f.write(f"Leg Name: {results.get('leg_name', 'Unknown')}\n")
+            f.write(f"Leg Type: {results.get('leg_type', 'Unknown')}\n")
             f.write(f"Workflow Type: {results.get('workflow_type', 'Unknown')}\n")
             f.write(f"Resume Enabled: {results.get('resume_enabled', False)}\n")
             f.write(f"Overall Successful: {results.get('overall_successful', False)}\n")
@@ -684,18 +785,21 @@ class AdaptiveFepSimulationWorkflow:
                     f.write(
                         f"Final runtime constant: {phase_result['final_runtime_constant']:.6f}\n"
                     )
-                if 'successful_legs' in phase_result and 'total_legs' in phase_result:
+                if 'improvement_factor' in phase_result:
                     f.write(
-                        f"Successful legs: {phase_result['successful_legs']}/{phase_result['total_legs']}\n"  # noqa: E501
+                        f"Improvement factor: {phase_result['improvement_factor']:.3f}\n"
                     )
+                if 'applied' in phase_result:
+                    f.write(f"Applied: {phase_result['applied']}\n")
 
                 f.write("\n")
 
             # Write summary
             if 'summary' in results:
                 summary = results['summary']
-                f.write("WORKFLOW SUMMARY:\n")
+                f.write("LEG WORKFLOW SUMMARY:\n")
                 f.write("-" * 40 + "\n")
+                f.write(f"Leg Name: {summary.get('leg_name', 'Unknown')}\n")
                 f.write(f"Total Runtime: {summary.get('total_runtime', 0)} ns\n")
                 f.write(
                     f"Lambda Optimization Applied: {summary.get('lambda_optimization_applied', False)}\n"  # noqa: E501
@@ -718,64 +822,285 @@ class AdaptiveFepSimulationWorkflow:
                 except Exception as e:
                     f.write(f"Could not get status summary: {e}\n")
 
-        logger.info(f"Workflow report saved to {output_path}")
+        logger.info(f"{self.leg_name} leg - Workflow report saved to {output_path}")
+
+    def get_status(self) -> dict[str, Any]:
+        """Get current status of this leg's workflow."""
+        return dict(self.workflow_results)
+
+    def cleanup_state(self) -> None:
+        """Clean up state files for fresh start."""
+        if self.workflow_state_file.exists():
+            try:
+                self.workflow_state_file.unlink()
+                logger.info(f"{self.leg_name} leg - cleaned up workflow state file")
+            except Exception as e:
+                logger.warning(f"{self.leg_name} leg - could not clean up state: {e}")
+
+        self.completed_phases = set()
+
+
+class AdaptiveFepSimulationCalculationLevelWorkflow:
+    """
+    Orchestrator that manages multiple AdaptiveFepSimulationLegLevelWorkflow instances
+    for processing an entire calculation.
+    """
+
+    def __init__(
+        self,
+        calculation: Calculation,
+        enable_monitoring: bool = True,
+        use_hpc: bool = True,
+        run_sync: bool = True,
+        skip_completed_phases: bool = True,
+    ):
+        self.calculation = calculation
+        self.enable_monitoring = enable_monitoring
+        self.use_hpc = use_hpc
+        self.run_sync = run_sync
+        self.skip_completed_phases = skip_completed_phases
+
+        # Create leg workflows
+        self.leg_workflows: dict[str, AdaptiveFepSimulationLegLevelWorkflow] = {}
+
+        for leg in calculation.legs:
+            leg_name = leg.leg_type.name.lower()
+            self.leg_workflows[leg_name] = AdaptiveFepSimulationLegLevelWorkflow(
+                leg=leg,
+                enable_monitoring=enable_monitoring,
+                use_hpc=use_hpc,
+                run_sync=run_sync,
+                skip_completed_phases=skip_completed_phases,
+            )
+
+        logger.info(
+            f"Initialized calculation orchestrator with {len(self.leg_workflows)} leg workflows"
+        )
+
+    def run_all_legs(
+        self,
+        run_sequentially: bool = True,
+        **kwargs,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Run adaptive workflows for all legs.
+
+        Parameters
+        ----------
+        run_sequentially : bool, default True
+            Whether to run legs sequentially (True) or in parallel (False)
+        **kwargs
+            Parameters passed to each leg workflow
+
+        Returns
+        -------
+        Dict[str, Dict[str, Any]]
+            Results for each leg
+        """
+        logger.info("🚀 Running adaptive workflows for all legs...")
+
+        results = {}
+        if run_sequentially:
+            for leg_name, leg_workflow in self.leg_workflows.items():
+                logger.info(f"\n{'='*70}")
+                logger.info(f"PROCESSING {leg_name.upper()} LEG WITH ADAPTIVE WORKFLOW")
+                logger.info(f"{'='*70}")
+
+                leg_result = leg_workflow.run_complete_adaptive_workflow(**kwargs)
+                results[leg_name] = leg_result
+
+                # Store results for report generation
+                leg_workflow._last_workflow_results = leg_result
+        else:
+            # TODO: Implement parallel processing using threading
+            logger.warning("Parallel processing not implemented, using sequential")
+            return self.run_all_legs(run_sequentially=True, **kwargs)
+
+        # Summary
+        successful_legs = sum(
+            1 for result in results.values() if result['overall_successful']
+        )
+        total_legs = len(results)
+
+        logger.info(f"\n{'='*70}")
+        if successful_legs == total_legs:
+            logger.info("🎉 ALL LEGS COMPLETED SUCCESSFULLY")
+        else:
+            logger.warning(
+                f"⚠️ PARTIAL SUCCESS: {successful_legs}/{total_legs} legs successful"
+            )
+
+        for leg_name, result in results.items():
+            status = "✅" if result['overall_successful'] else "❌"
+            logger.info(f"  {leg_name.upper()}: {status}")
+
+        logger.info(f"{'='*70}")
+
+        return results
+
+    def get_leg_workflow(self, leg_name: str) -> AdaptiveFepSimulationLegLevelWorkflow:
+        """Get the workflow for a specific leg."""
+        if leg_name not in self.leg_workflows:
+            raise ValueError(f"Leg not found: {leg_name}")
+        return self.leg_workflows[leg_name]
+
+    def retry_leg(self, leg_name: str, **kwargs) -> dict[str, Any]:
+        """Retry a specific leg."""
+        leg_workflow = self.get_leg_workflow(leg_name)
+        return leg_workflow.run_complete_adaptive_workflow(**kwargs)
+
+    def save_all_reports(self) -> None:
+        """Save workflow reports for all legs."""
+        for leg_workflow in self.leg_workflows.values():
+            leg_workflow.save_workflow_report()
+
+    def cleanup_all_states(self) -> None:
+        """Clean up state files for all legs."""
+        for leg_workflow in self.leg_workflows.values():
+            leg_workflow.cleanup_state()
+
+    def get_overall_status(self) -> dict[str, Any]:
+        """Get overall status across all legs."""
+        all_statuses = {}
+        for leg_name, leg_workflow in self.leg_workflows.items():
+            all_statuses[leg_name] = leg_workflow.get_status()
+
+        # Calculate overall statistics
+        total_legs = len(all_statuses)
+        successful_legs = sum(
+            1
+            for status in all_statuses.values()
+            if status.get('overall_successful', False)
+        )
+
+        return {
+            'total_legs': total_legs,
+            'successful_legs': successful_legs,
+            'success_rate': successful_legs / total_legs if total_legs > 0 else 0,
+            'leg_statuses': all_statuses,
+        }
 
 
 # Convenience functions for direct usage
-def run_adaptive_fep_workflow(
-    input_dir: str,
-    output_dir: str,
-    sim_config: GromacsFepSimulationConfig,
-    ensemble_size: int = 5,
+def run_adaptive_fep_workflow_single_leg(
+    leg: Leg,
+    short_run_runtime: float = 2.0,
     initial_runtime_constant: float = 0.001,
     max_runtime_per_window: float = 30.0,
-    short_run_runtime: float = 2.0,  # ns
+    optimize_lambda_spacing: bool = True,
     use_hpc: bool = True,
-    run_sync: bool = False,  # run asynchronously (non-blocking)
+    run_sync: bool = True,
     enable_monitoring: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
     """
-    Run an adaptive FEP calculation with automatic setup.
+    Run an adaptive FEP workflow on a single leg.
 
-    This is the main entry point for users who want to run adaptive
-    FEP calculations with minimal setup.
+    This is a convenience function for users who want to run adaptive
+    FEP calculations on individual legs.
+
+    Parameters
+    ----------
+    leg : Leg
+        GROMACS leg object to process
+    short_run_runtime : float, default 2.0
+        Runtime for gradient collection phase (ns)
+    initial_runtime_constant : float, default 0.001
+        Initial runtime constant for adaptive phase
+    max_runtime_per_window : float, default 30.0
+        Maximum runtime per window (ns)
+    optimize_lambda_spacing : bool, default True
+        Whether to run lambda optimization
+    use_hpc : bool, default True
+        Whether to use HPC
+    run_sync : bool, default True
+        Whether to run synchronously
+    enable_monitoring : bool, default True
+        Whether to enable monitoring
+    **kwargs
+        Additional arguments for the workflow
 
     Returns
     -------
-    dict
-        Comprehensive results from the workflow
+    Dict[str, Any]
+        Results from the leg workflow
     """
-    logger.info("Setting up adaptive FEP calculation...")
+    logger.info(f"Setting up adaptive FEP workflow for {leg.leg_type.name} leg...")
 
-    # Set up calculation
-    calculation = Calculation(
-        input_dir=input_dir,
-        output_dir=output_dir,
-        sim_config=sim_config,
-        ensemble_size=ensemble_size,
+    # Create leg workflow
+    leg_workflow = AdaptiveFepSimulationLegLevelWorkflow(
+        leg=leg,
+        enable_monitoring=enable_monitoring,
+        use_hpc=use_hpc,
+        run_sync=run_sync,
     )
-    calculation.setup()
+    results = leg_workflow.run_complete_adaptive_workflow(
+        short_run_runtime=short_run_runtime,
+        initial_runtime_constant=initial_runtime_constant,
+        max_runtime_per_window=max_runtime_per_window,
+        optimize_lambda_spacing=optimize_lambda_spacing,
+        **kwargs,
+    )
 
-    # Create workflow manager
-    fep_workflow = AdaptiveFepSimulationWorkflow(
+    # Store results for report generation
+    leg_workflow._last_workflow_results = results
+
+    # Save report
+    leg_workflow.save_workflow_report()
+
+    return results
+
+
+def run_adaptive_fep_workflow_calculation(
+    calculation: Calculation,
+    short_run_runtime: float = 2.0,
+    initial_runtime_constant: float = 0.001,
+    max_runtime_per_window: float = 30.0,
+    optimize_lambda_spacing: bool = True,
+    use_hpc: bool = True,
+    run_sync: bool = True,
+    enable_monitoring: bool = True,
+    run_sequentially: bool = True,
+    **kwargs,
+) -> dict[str, dict[str, Any]]:
+    """
+    Run adaptive FEP workflows for an entire calculation using leg-level processing.
+
+    Parameters
+    ----------
+    calculation : Calculation
+        GROMACS calculation object containing multiple legs
+    run_sequentially : bool, default True
+        Whether to process legs sequentially
+    **kwargs
+        Additional arguments passed to each leg workflow
+
+    Returns
+    -------
+    Dict[str, Dict[str, Any]]
+        Results for each leg in the calculation
+    """
+    logger.info("Setting up adaptive FEP workflows for entire calculation...")
+
+    # Create orchestrator
+    orchestrator = AdaptiveFepSimulationCalculationLevelWorkflow(
         calculation=calculation,
         enable_monitoring=enable_monitoring,
         use_hpc=use_hpc,
         run_sync=run_sync,
     )
 
-    results = fep_workflow.run_complete_adaptive_workflow(
+    # Run all legs
+    results = orchestrator.run_all_legs(
+        run_sequentially=run_sequentially,
+        short_run_runtime=short_run_runtime,
         initial_runtime_constant=initial_runtime_constant,
         max_runtime_per_window=max_runtime_per_window,
-        short_run_runtime=short_run_runtime,
+        optimize_lambda_spacing=optimize_lambda_spacing,
         **kwargs,
     )
 
-    # Store results for report generation
-    fep_workflow._last_workflow_results = results
-
-    # Save report
-    fep_workflow.save_workflow_report()
+    # Save all reports
+    orchestrator.save_all_reports()
 
     return results
