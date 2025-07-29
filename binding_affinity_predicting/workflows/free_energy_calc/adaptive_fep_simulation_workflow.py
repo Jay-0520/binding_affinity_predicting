@@ -15,6 +15,7 @@ from binding_affinity_predicting.components.simulation_fep.adaptive_simulation_r
 )
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
     Calculation,
+    GromacsFepSimulationConfig,
     Leg,
 )
 from binding_affinity_predicting.components.simulation_fep.lambda_optimizer import (
@@ -272,7 +273,7 @@ class AdaptiveFepSimulationLegLevelWorkflow:
 
     def _run_adaptively(
         self,
-        initial_runtime_constant: float = 0.001,
+        initial_runtime_constant: float = 0.005,
         equilibration_method: str = "multiwindow",
         max_runtime_per_window: float = 30.0,
         max_iterations: int = 10,
@@ -326,7 +327,7 @@ class AdaptiveFepSimulationLegLevelWorkflow:
     def run_complete_adaptive_workflow(
         self,
         short_run_runtime: float = 2.0,  # 2ns; TODO: could be adaptive as well.
-        initial_runtime_constant: float = 0.001,
+        initial_runtime_constant: float = 0.005,
         equilibration_method: str = "multiwindow",
         max_runtime_per_window: float = 30.0,
         optimize_lambda_spacing: bool = True,
@@ -347,7 +348,7 @@ class AdaptiveFepSimulationLegLevelWorkflow:
         ----------
         short_run_runtime : float, default 2.0
             Runtime for short simulations to collect gradients (ns)
-        initial_runtime_constant : float, default 0.001
+        initial_runtime_constant : float, default 0.005
             Initial runtime constant for production simulations
         equilibration_method : str, default "multiwindow"
             Equilibration detection method for production
@@ -985,7 +986,7 @@ class AdaptiveFepSimulationCalculationLevelWorkflow:
 def run_adaptive_fep_workflow_single_leg(
     leg: Leg,
     short_run_runtime: float = 2.0,
-    initial_runtime_constant: float = 0.001,
+    initial_runtime_constant: float = 0.005,
     max_runtime_per_window: float = 30.0,
     optimize_lambda_spacing: bool = True,
     use_hpc: bool = True,
@@ -1005,7 +1006,7 @@ def run_adaptive_fep_workflow_single_leg(
         GROMACS leg object to process
     short_run_runtime : float, default 2.0
         Runtime for gradient collection phase (ns)
-    initial_runtime_constant : float, default 0.001
+    initial_runtime_constant : float, default 0.005
         Initial runtime constant for adaptive phase
     max_runtime_per_window : float, default 30.0
         Maximum runtime per window (ns)
@@ -1104,3 +1105,64 @@ def run_adaptive_fep_workflow_calculation(
     orchestrator.save_all_reports()
 
     return results
+
+
+def run_adaptive_fep_workflow(
+    input_dir: str,
+    output_dir: str,
+    sim_config: GromacsFepSimulationConfig,
+    ensemble_size: int = 5,
+    initial_runtime_constant: float = 0.001,
+    max_runtime_per_window: float = 30.0,
+    short_run_runtime: float = 2.0,
+    use_hpc: bool = True,
+    run_sync: bool = False,
+    enable_monitoring: bool = True,
+    **kwargs,
+) -> dict[str, dict[str, Any]]:
+    """
+    Run an adaptive FEP calculation with automatic setup using leg-level processing.
+
+    This is the main entry point for users who want to run adaptive
+    FEP calculations with minimal setup using the new leg-level approach.
+
+    Parameters
+    ----------
+    input_dir : str
+        Directory containing input files
+    output_dir : str
+        Directory for output files
+    sim_config : GromacsFepSimulationConfig
+        Simulation configuration
+    ensemble_size : int, default 5
+        Number of ensemble members
+    **kwargs
+        Additional arguments for the workflow
+
+    Returns
+    -------
+    Dict[str, Dict[str, Any]]
+        Results for each leg in the calculation
+    """
+    logger.info("Setting up leg-level adaptive FEP calculation...")
+
+    # Set up calculation
+    calculation = Calculation(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        sim_config=sim_config,
+        ensemble_size=ensemble_size,
+    )
+    calculation.setup()
+
+    # Run using leg-level approach
+    return run_adaptive_fep_workflow_calculation(
+        calculation=calculation,
+        short_run_runtime=short_run_runtime,
+        initial_runtime_constant=initial_runtime_constant,
+        max_runtime_per_window=max_runtime_per_window,
+        use_hpc=use_hpc,
+        run_sync=run_sync,
+        enable_monitoring=enable_monitoring,
+        **kwargs,
+    )

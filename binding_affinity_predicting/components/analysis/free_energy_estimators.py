@@ -23,6 +23,15 @@ from binding_affinity_predicting.components.analysis.utils import (
     get_lambda_components_changing,
 )
 
+# at pymbar/mabar.py, ConvergenceError is not defined
+try:
+    from pymbar.utils import ConvergenceError
+except ImportError:
+
+    class ConvergenceError(Exception):
+        pass
+
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
