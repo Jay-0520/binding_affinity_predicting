@@ -12,6 +12,7 @@ from binding_affinity_predicting.components.analysis.uncorrelate_subsampler impo
     perform_uncorrelating_subsampling,
 )
 from binding_affinity_predicting.components.analysis.xvg_data_loader import (
+    GromacsXVGParser,
     load_alchemical_data,
 )
 from binding_affinity_predicting.components.simulation_fep.gromacs_orchestration import (
@@ -62,7 +63,6 @@ class FepSimulationAnalyzer:
         self.estimator = FreeEnergyEstimator(
             temperature=temperature, units=units, software=software
         )
-
         # Storage for analysis results
         self._analysis_results: dict[str, Any] = {}
 
