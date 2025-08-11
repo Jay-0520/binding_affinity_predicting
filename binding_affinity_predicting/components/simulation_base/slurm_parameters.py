@@ -3,6 +3,9 @@ Script generators for GROMACS ABFE calculations.
 
 This module provides Python classes to generate MDP files and SLURM submit scripts
 programmatically, replacing the need for template files.
+
+Default settings are decided based on this link:
+   https://docs.alliancecan.ca/wiki/GROMACS#Notes_on_running_GROMACS_on_GPUs
 """
 
 from pathlib import Path
@@ -16,12 +19,22 @@ class SlurmParameters(BaseModel):
 
     # Basic SLURM parameters
     job_name: str = Field(default="gromacs_abfe", description="Job name")
-    nodes: int = Field(default=1, ge=1, description="Number of nodes")
+    account: Optional[str] = Field(default=None, description="SLURM account name")
+    nodes: Optional[int] = Field(default=None, ge=1, description="Number of nodes")
     ntasks_per_node: int = Field(default=1, ge=1, description="Tasks per node")
     cpus_per_task: int = Field(default=8, ge=1, description="CPUs per task")
-    gres: str = Field(default="gpu:1", description="Generic resources (e.g., GPUs)")
+    gpus_per_node: Optional[int] = Field(
+        default=None, ge=1, description="GPUs per node"
+    )
+    gres: Optional[str] = Field(
+        default=None, description="Generic resources (e.g., GPUs)"
+    )
     time: str = Field(default="24:00:00", description="Wall time limit")
-    mem: str = Field(default="16G", description="Memory requirement")
+    mem: str = Field(default="8G", description="Memory requirement")
+
+    use_cpu_bind: bool = Field(
+        default=True, description="Use --cpu-bind=cores with srun"
+    )
 
     # Output files
     output_file: str = Field(default="slurm-%j.out", description="Standard output file")
@@ -66,11 +79,13 @@ class SlurmParameters(BaseModel):
         validate_assignment = True
         schema_extra = {
             "example": {
-                "job_name": "abfe_lambda_0_run_1",
-                "partition": "gpu",
-                "time": "24:00:00",
-                "mem": "32G",
-                "gres": "gpu:a100:1",
+                "job_name": "fepsweep_cpu4",
+                "account": "rrg-mkoz",
+                "gpus_per_node": 1,
+                "cpus_per_task": 4,
+                "time": "02:00:00",
+                "mem": "8G",
+                "use_cpu_bind": True,
             }
         }
 
@@ -160,15 +175,27 @@ class SlurmSubmitGenerator:
             "#!/bin/bash",
             "",
             f"#SBATCH --job-name={params.job_name}",
-            f"#SBATCH --nodes={params.nodes}",
-            f"#SBATCH --ntasks-per-node={params.ntasks_per_node}",
-            f"#SBATCH --cpus-per-task={params.cpus_per_task}",
-            f"#SBATCH --gres={params.gres}",
-            f"#SBATCH --time={params.time}",
-            f"#SBATCH --mem={params.mem}",
-            f"#SBATCH --output={params.output_file}",
-            f"#SBATCH --error={params.error_file}",
         ]
+
+        # Add account if specified
+        if params.account:
+            lines.append(f"#SBATCH --account={params.account}")
+
+        # Add GPU specification (prefer gpus-per-node over gres)
+        if params.gpus_per_node:
+            lines.append(f"#SBATCH --gpus-per-node={params.gpus_per_node}")
+        elif params.gres:
+            lines.append(f"#SBATCH --gres={params.gres}")
+
+        lines.extend(
+            [
+                f"#SBATCH --cpus-per-task={params.cpus_per_task}",
+                f"#SBATCH --time={params.time}",
+                f"#SBATCH --error={params.error_file}",
+                f"#SBATCH --output={params.output_file}",
+                f"#SBATCH --mem={params.mem}",
+            ]
+        )
 
         # Add custom SLURM directives
         for key, value in params.custom_directives.items():
@@ -177,14 +204,7 @@ class SlurmSubmitGenerator:
         lines.extend(
             [
                 "",
-                "# Job information",
-                'echo "Job started at: $(date)"',
-                f'echo "Lambda state: {lambda_state}"',
-                f'echo "Run number: {run_number}"',
-                'echo "Working directory: $(pwd)"',
-                'echo "SLURM_JOB_ID: $SLURM_JOB_ID"',
-                'echo "Node: $SLURM_NODELIST"',
-                "",
+                "module --force purge",
             ]
         )
 
@@ -198,6 +218,15 @@ class SlurmSubmitGenerator:
                 ]
             )
 
+        lines.extend(
+            [
+                "",
+                'export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"',
+                "export GMX_ENABLE_DIRECT_GPU_COMM=1",
+                "",
+            ]
+        )
+
         # Pre-commands
         if pre_commands:
             lines.extend(
@@ -209,14 +238,14 @@ class SlurmSubmitGenerator:
             )
 
         # Main GROMACS commands
+        srun_cmd = "srun --cpu-bind=cores" if params.use_cpu_bind else "srun"
         lines.extend(
             [
-                "# GROMACS simulation",
-                'echo "Starting GROMACS preparation..."',
-                f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",  # noqa
+                "# prepare (optional if already exists)",
+                f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",  # noqa E501
                 "",
-                'echo "Starting GROMACS simulation..."',
-                f"{gmx_exe} mdrun -deffnm {output_prefix} -s {tpr_file} -cpi {output_prefix}.cpt",
+                "# run with explicit threading to match cpus-per-task",
+                f"{srun_cmd} {gmx_exe} mdrun -deffnm {output_prefix} -s {tpr_file}",
                 "",
             ]
         )
@@ -275,7 +304,7 @@ class SlurmSubmitGenerator:
 
 
 def create_default_slurm_generator(
-    time: str = "24:00:00", mem: str = "16G"
+    time: str = "24:00:00", mem: str = "8G"
 ) -> SlurmSubmitGenerator:
     """Create SLURM generator with common defaults and Pydantic validation."""
     params = SlurmParameters(time=time, mem=mem)
