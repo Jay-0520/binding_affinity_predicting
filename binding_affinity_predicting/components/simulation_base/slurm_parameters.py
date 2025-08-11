@@ -19,12 +19,12 @@ class SlurmParameters(BaseModel):
 
     # Basic SLURM parameters
     job_name: str = Field(default="gromacs_abfe", description="Job name")
-    account: Optional[str] = Field(default=None, description="SLURM account name")
+    account: str = Field(default="default_user", description="SLURM account name")
     nodes: Optional[int] = Field(default=None, ge=1, description="Number of nodes")
     ntasks_per_node: int = Field(default=1, ge=1, description="Tasks per node")
     cpus_per_task: int = Field(default=8, ge=1, description="CPUs per task")
-    gpus_per_node: Optional[int] = Field(
-        default=None, ge=1, description="GPUs per node"
+    gpus_per_task: int = Field(
+        default=1, ge=1, description="GPUs per node"
     )
     gres: Optional[str] = Field(
         default=None, description="Generic resources (e.g., GPUs)"
@@ -118,6 +118,7 @@ class SlurmSubmitGenerator:
         custom_overrides: Optional[dict[str, str]] = None,
         pre_commands: Optional[list[str]] = None,
         post_commands: Optional[list[str]] = None,
+        mdrun_options: Optional[str] = None,
     ) -> str:
         """Generate SLURM submit script content with Pydantic validation."""
         # Create a copy of base parameters
@@ -153,6 +154,7 @@ class SlurmSubmitGenerator:
             modules_to_load=modules_to_load,
             pre_commands=pre_commands,
             post_commands=post_commands,
+            mdrun_options=mdrun_options,
         )
 
     def _format_submit_script(
@@ -169,6 +171,7 @@ class SlurmSubmitGenerator:
         modules_to_load: Optional[list[str]] = None,
         pre_commands: Optional[list[str]] = None,
         post_commands: Optional[list[str]] = None,
+        mdrun_options: Optional[str] = None,
     ) -> str:
         """Format parameters into submit script content."""
         lines = [
@@ -182,14 +185,13 @@ class SlurmSubmitGenerator:
             lines.append(f"#SBATCH --account={params.account}")
 
         # Add GPU specification (prefer gpus-per-node over gres)
-        if params.gpus_per_node:
-            lines.append(f"#SBATCH --gpus-per-node={params.gpus_per_node}")
-        elif params.gres:
+        if params.gres:
             lines.append(f"#SBATCH --gres={params.gres}")
 
         lines.extend(
             [
                 f"#SBATCH --cpus-per-task={params.cpus_per_task}",
+                f"#SBATCH --gpus-per-task={params.gpus_per_task}",
                 f"#SBATCH --time={params.time}",
                 f"#SBATCH --error={params.error_file}",
                 f"#SBATCH --output={params.output_file}",
@@ -239,16 +241,19 @@ class SlurmSubmitGenerator:
 
         # Main GROMACS commands
         srun_cmd = "srun --cpu-bind=cores" if params.use_cpu_bind else "srun"
-        lines.extend(
-            [
-                "# prepare (optional if already exists)",
-                f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",  # noqa E501
-                "",
-                "# run with explicit threading to match cpus-per-task",
-                f"{srun_cmd} {gmx_exe} mdrun -deffnm {output_prefix} -s {tpr_file}",
-                "",
-            ]
-        )
+        # Build mdrun command with optional mdrun_options
+        mdrun_cmd = f"{gmx_exe} mdrun -deffnm {output_prefix} -s {tpr_file}"
+        if mdrun_options:
+            mdrun_cmd += f" {mdrun_options}"
+            
+        lines.extend([
+            "# prepare (optional if already exists)",
+            f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",
+            "",
+            "# run with explicit threading to match cpus-per-task",
+            f"{srun_cmd} {mdrun_cmd}",
+            "",
+        ])
 
         # Post-commands
         if post_commands:
@@ -279,6 +284,7 @@ class SlurmSubmitGenerator:
         custom_overrides: Optional[dict[str, str]] = None,
         pre_commands: Optional[list[str]] = None,
         post_commands: Optional[list[str]] = None,
+        mdrun_options: Optional[str] = None,
     ) -> None:
         """
         Write submit script to disk and make it executable with Pydantic validation.
@@ -296,6 +302,7 @@ class SlurmSubmitGenerator:
             custom_overrides=custom_overrides,
             pre_commands=pre_commands,
             post_commands=post_commands,
+            mdrun_options=mdrun_options,
         )
 
         output_file = Path(output_path)
