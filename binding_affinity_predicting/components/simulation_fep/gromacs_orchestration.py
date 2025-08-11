@@ -179,7 +179,7 @@ class LambdaWindow(SimulationRunner):
             slurm_overrides = self.sim_params.get("slurm_overrides", {})
             pre_commands = self.sim_params.get("pre_commands", [])
             post_commands = self.sim_params.get("post_commands", [])
-            mdrun_options = self.sim_params.get("mdrun_options", None) 
+            mdrun_options = self.sim_params.get("mdrun_options", None)
 
             # Generate submit script using the simulation's method
             sim.generate_submit_script(
@@ -187,7 +187,7 @@ class LambdaWindow(SimulationRunner):
                 slurm_overrides=slurm_overrides,  # params are overrided here
                 pre_commands=pre_commands,
                 post_commands=post_commands,
-                mdrun_options=mdrun_options, 
+                mdrun_options=mdrun_options,
             )
 
             logger.info(

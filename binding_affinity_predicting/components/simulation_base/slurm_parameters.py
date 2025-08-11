@@ -23,9 +23,7 @@ class SlurmParameters(BaseModel):
     nodes: Optional[int] = Field(default=None, ge=1, description="Number of nodes")
     ntasks_per_node: int = Field(default=1, ge=1, description="Tasks per node")
     cpus_per_task: int = Field(default=8, ge=1, description="CPUs per task")
-    gpus_per_task: int = Field(
-        default=1, ge=1, description="GPUs per node"
-    )
+    gpus_per_task: int = Field(default=1, ge=1, description="GPUs per node")
     gres: Optional[str] = Field(
         default=None, description="Generic resources (e.g., GPUs)"
     )
@@ -245,15 +243,17 @@ class SlurmSubmitGenerator:
         mdrun_cmd = f"{gmx_exe} mdrun -deffnm {output_prefix} -s {tpr_file}"
         if mdrun_options:
             mdrun_cmd += f" {mdrun_options}"
-            
-        lines.extend([
-            "# prepare (optional if already exists)",
-            f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",
-            "",
-            "# run with explicit threading to match cpus-per-task",
-            f"{srun_cmd} {mdrun_cmd}",
-            "",
-        ])
+
+        lines.extend(
+            [
+                "# prepare (optional if already exists)",
+                f"{gmx_exe} grompp -f {mdp_file} -c {gro_file} -p {top_file} -o {tpr_file} -maxwarn 10",  # noqa E501
+                "",
+                "# run with explicit threading to match cpus-per-task",
+                f"{srun_cmd} {mdrun_cmd}",
+                "",
+            ]
+        )
 
         # Post-commands
         if post_commands:

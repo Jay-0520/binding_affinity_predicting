@@ -222,7 +222,7 @@ class Simulation:
         slurm_overrides: Optional[dict[str, str]] = None,
         pre_commands: Optional[list[str]] = None,
         post_commands: Optional[list[str]] = None,
-        mdrun_options: Optional[str] = None,  
+        mdrun_options: Optional[str] = None,
     ) -> str:
         """
         Generate SLURM submit script for this simulation using Pydantic validation.
