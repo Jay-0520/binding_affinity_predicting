@@ -222,6 +222,7 @@ class Simulation:
         slurm_overrides: Optional[dict[str, str]] = None,
         pre_commands: Optional[list[str]] = None,
         post_commands: Optional[list[str]] = None,
+        mdrun_options: Optional[str] = None,
     ) -> str:
         """
         Generate SLURM submit script for this simulation using Pydantic validation.
@@ -261,6 +262,7 @@ class Simulation:
                 custom_overrides=slurm_overrides,
                 pre_commands=pre_commands,
                 post_commands=post_commands,
+                mdrun_options=mdrun_options,
             )
 
             logger.info(f"Generated validated submit script: {output_path}")

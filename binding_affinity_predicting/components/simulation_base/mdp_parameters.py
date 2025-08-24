@@ -20,7 +20,7 @@ class MDPParameters(BaseModel):
     and sensible defaults for ABFE calculations."""
 
     # Run control
-    integrator: str = Field(default="sd", description="Stochastic leap-frog integrator")
+    integrator: str = Field(default="md", description="Stochastic leap-frog integrator")
     nsteps: int = Field(
         default=5_000,
         ge=1,
@@ -57,7 +57,7 @@ class MDPParameters(BaseModel):
         default="lincs", description="Holonomic constraints"
     )
     constraints: str = Field(
-        default="all-bonds", description="Constrain all bonds (not just hydrogens)"
+        default="h-bonds", description="Constrain all bonds (not just hydrogens)"
     )
     lincs_iter: int = Field(default=1, ge=1, description="Accuracy of LINCS")
     lincs_order: int = Field(default=4, ge=1, description="Accuracy of LINCS")
@@ -73,7 +73,7 @@ class MDPParameters(BaseModel):
     # Neighbor searching
     cutoff_scheme: str = Field(default="Verlet", description="Cutoff scheme")
     ns_type: str = Field(default="grid", description="Search neighboring grid cells")
-    nstlist: int = Field(default=10, ge=1, description="Neighborlist update frequency")
+    nstlist: int = Field(default=40, ge=1, description="Neighborlist update frequency")
     rlist: float = Field(
         default=1.0, gt=0, description="Short-range neighborlist cutoff (nm)"
     )
@@ -82,38 +82,41 @@ class MDPParameters(BaseModel):
     # Electrostatics
     coulombtype: str = Field(default="PME", description="Particle Mesh Ewald")
     rcoulomb: float = Field(
-        default=1.0, gt=0, description="Short-range electrostatic cutoff (nm)"
+        default=1.2, gt=0, description="Short-range electrostatic cutoff (nm)"
     )
     ewald_geometry: str = Field(
         default="3d", description="Ewald sum in all three dimensions"
     )
-    pme_order: int = Field(default=6, ge=4, description="Interpolation order for PME")
+    pme_order: int = Field(default=4, ge=4, description="Interpolation order for PME")
     fourierspacing: float = Field(
-        default=0.10, gt=0, description="Grid spacing for FFT"
+        default=0.12, gt=0, description="Grid spacing for FFT"
     )
     ewald_rtol: float = Field(
-        default=1e-6,
+        default=1e-5,
         gt=0,
         description="Relative strength of Ewald-shifted direct potential",
     )
 
     # van der Waals
-    vdw_type: str = Field(default="PME", description="vdW interaction type")
-    rvdw: float = Field(default=1.0, gt=0, description="vdW cutoff")
+    vdw_type: str = Field(default="Cut-off", description="vdW interaction type")
+    rvdw: float = Field(default=1.2, gt=0, description="vdW cutoff")
     vdw_modifier: str = Field(
         default="Potential-Shift", description="vdW potential modifier"
     )
-    ewald_rtol_lj: float = Field(
-        default=1e-3, gt=0, description="LJ Ewald relative tolerance"
-    )
-    lj_pme_comb_rule: str = Field(
-        default="Geometric", description="LJ PME combination rule"
-    )
+    # ewald_rtol_lj: float = Field(
+    #     default=1e-3, gt=0, description="LJ Ewald relative tolerance"
+    # )
+    # lj_pme_comb_rule: str = Field(
+    #     default="Geometric", description="LJ PME combination rule"
+    # )
     dispcorr: str = Field(
         default="EnerPres", description="Long-range dispersion correction"
     )
 
     # Temperature coupling
+    tcoupl: str = Field(
+        default="v-rescale", description="Temperature coupling algorithm"
+    )
     tc_grps: str = Field(default="System", description="Temperature coupling groups")
     tau_t: float = Field(
         default=1.0, gt=0, description="Time constant for temperature coupling"
@@ -391,13 +394,14 @@ class MDPGenerator:
             f"vdw-type                = {params.vdw_type}",
             f"rvdw                    = {params.rvdw}",
             f"vdw-modifier            = {params.vdw_modifier}",
-            f"ewald-rtol-lj           = {params.ewald_rtol_lj}",
-            f"lj-pme-comb-rule        = {params.lj_pme_comb_rule}",
+            # f"ewald-rtol-lj           = {params.ewald_rtol_lj}",
+            # f"lj-pme-comb-rule        = {params.lj_pme_comb_rule}",
             f"DispCorr                = {params.dispcorr}",
             "",
             ";----------------------------------------------------",
             "; TEMPERATURE & PRESSURE COUPL",
             ";----------------------------------------------------",
+            f"tcoupl           = {params.tcoupl}            ; Temperature coupling algorithm",
             f"tc_grps          = {params.tc_grps}",
             f"tau_t            = {params.tau_t}",
             f"ref_t            = {params.ref_t}",
