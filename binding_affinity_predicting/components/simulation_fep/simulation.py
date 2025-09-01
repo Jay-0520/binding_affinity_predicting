@@ -126,6 +126,10 @@ class Simulation:
         # Simple flag to track if this was submitted via HPC
         self._submitted_via_hpc = False
 
+        # Add resuming mode
+        self._resume_mode = False
+        self._checkpoint_file = None
+
         self._validate_inputs()
 
     def _create_default_mdp_generator(self) -> MDPGenerator:
@@ -272,7 +276,57 @@ class Simulation:
             logger.error(f"Failed to generate submit script: {e}")
             raise
 
-    def run(self, runtime: Optional[float] = None) -> None:
+    def run(self, runtime: Optional[float] = None, resume: bool = True) -> None:
+        """
+        Run the simulation with resume capability.
+
+        Parameters
+        ----------
+        runtime : float, optional
+            Runtime in nanoseconds
+        resume : bool, default True
+            Whether to attempt resume from checkpoint if available
+        """
+        # Check resume capability
+        resume_status = self._check_resume_capability()
+
+        # Skip if already completed
+        if resume_status["is_completed"]:
+            logger.info(
+                f"Simulation λ={self.lam_state}, run={self.run_index} already completed, skipping"
+            )
+            self._finished = True
+            self.job_status = JobStatus.FINISHED
+            return
+
+        # Set resume mode if requested and possible
+        if resume and resume_status["can_resume"]:
+            self._resume_mode = True
+            logger.info(
+                f"Resuming simulation λ={self.lam_state}, run={self.run_index} from checkpoint"
+            )
+
+            # Calculate remaining runtime if specified
+            if runtime is not None:
+                current_time = resume_status["simulation_time"]
+                remaining_time = runtime - current_time
+                if remaining_time <= 0:
+                    logger.info(
+                        f"Simulation λ={self.lam_state}, run={self.run_index} has already reached target runtime"
+                    )
+                    self._finished = True
+                    self.job_status = JobStatus.FINISHED
+                    return
+                else:
+                    logger.info(
+                        f"Continuing simulation for {remaining_time:.3f} ns (current: {current_time:.3f} ns, target: {runtime:.3f} ns)"
+                    )
+                    runtime = remaining_time
+
+        # Run the simulation (modified to support resume)
+        self._run(runtime)
+
+    def _run(self, runtime: Optional[float] = None) -> None:
         """
         Run the simulation locally (blocking).
         """
@@ -286,21 +340,24 @@ class Simulation:
             # First time - need to setup
             logger.info(f"Setting up simulation for λ={self.lam_state} (first time)")
             self.setup()
-        elif runtime is not None:
-            # File exists but have new runtime - regenerate
-            logger.info(
-                f"Regenerating MDP file for λ={self.lam_state} with runtime {runtime} ns"
-            )
-            self.mdp_generator.write_mdp_file(
-                output_path=self.mdp_file,
-                lambda_state=self.lam_state,
-                bonded_lambdas=self.bonded_list,
-                coul_lambdas=self.coul_list,
-                vdw_lambdas=self.vdw_list,
-                runtime_ns=runtime,  # Important -> Use updated runtime
-                # we must omit custom_overrides here
-            )
-            self.setup_time = datetime.now()
+        else:
+            if runtime is not None:
+                # File exists but have new runtime - regenerate
+                # we also need to consider resume here
+                # if not self._resume_mode:
+                logger.info(
+                    f"Regenerating MDP file for λ={self.lam_state} with runtime {runtime} ns"
+                )
+                self.mdp_generator.write_mdp_file(
+                    output_path=self.mdp_file,
+                    lambda_state=self.lam_state,
+                    bonded_lambdas=self.bonded_list,
+                    coul_lambdas=self.coul_list,
+                    vdw_lambdas=self.vdw_list,
+                    runtime_ns=runtime,  # Important -> Use updated runtime
+                    # we must omit custom_overrides here
+                )
+                self.setup_time = datetime.now()
 
         # 2. gmx grompp
         logger.info(f"Preparing tpr for lambda {self.lam_state} in {self.work_dir}")
@@ -318,6 +375,13 @@ class Simulation:
             "-maxwarn",
             "10",  # Allow some warnings
         ]
+        # Add checkpoint file for resume if available
+        if self._resume_mode and self._checkpoint_file:
+            grompp_cmd.extend(["-t", os.path.basename(self._checkpoint_file)])
+            logger.info(
+                f"Using checkpoint file: {self._checkpoint_file} for resuming the simulation"
+            )
+
         try:
             result = subprocess.run(
                 grompp_cmd,
@@ -497,3 +561,52 @@ class Simulation:
             return 0.0
 
         return 0.0
+
+    def _check_resume_capability(self) -> dict[str, Any]:
+        """Check if this simulation can be resumed."""
+        work_dir = Path(self.work_dir)
+
+        # Check for checkpoint file
+        cpt_file = work_dir / f"lambda_{self.lam_state}_run_{self.run_index}.cpt"
+        log_file = work_dir / f"lambda_{self.lam_state}_run_{self.run_index}.log"
+
+        status = {
+            "can_resume": False,
+            "is_completed": False,
+            "checkpoint_exists": cpt_file.exists(),
+            "log_exists": log_file.exists(),
+            "simulation_time": 0.0,
+        }
+
+        if log_file.exists():
+            try:
+                # Check if completed
+                with open(log_file, 'r') as f:
+                    content = f.read()
+                    if "Finished mdrun" in content:  # the last line of the GROMACS log
+                        status["is_completed"] = True
+                        logger.info(
+                            f"Simulation λ={self.lam_state}, run={self.run_index} already completed"
+                        )
+
+                # Get current simulation time
+                from binding_affinity_predicting.components.simulation_base.utils import (
+                    parse_simulation_time_from_log,
+                )
+
+                status["simulation_time"] = parse_simulation_time_from_log(
+                    str(log_file)
+                )
+
+            except Exception as e:
+                logger.debug(f"Could not parse log file {log_file}: {e}")
+
+        # Can resume if checkpoint exists and not completed
+        if cpt_file.exists() and not status["is_completed"]:
+            status["can_resume"] = True
+            self._checkpoint_file = str(cpt_file)
+            logger.info(
+                f"Simulation λ={self.lam_state}, run={self.run_index} can be resumed from checkpoint"
+            )
+
+        return status
